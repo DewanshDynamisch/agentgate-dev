@@ -1,4 +1,4 @@
-# deploy/demo/run-credential-e2e.ps1
+# deploy/demo/run-demo-e2e.ps1
 # Live proof (Docker) that the backend receives ONLY an AgentGate-minted
 # downstream credential and never the agent's inbound token.
 # Compatible with Windows PowerShell 5.1 and pwsh. Paths resolve from $PSScriptRoot.
