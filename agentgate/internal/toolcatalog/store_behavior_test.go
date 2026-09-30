@@ -121,6 +121,9 @@ func TestValidate(t *testing.T) {
 		"bad risk":       func(d *ToolDefinition) { d.Risk = "" },
 		"bad schema":     func(d *ToolDefinition) { d.SchemaJSON = json.RawMessage(`{`) },
 		"empty schema":   func(d *ToolDefinition) { d.SchemaJSON = nil },
+		"null schema":    func(d *ToolDefinition) { d.SchemaJSON = json.RawMessage(`null`) },
+		"number schema":  func(d *ToolDefinition) { d.SchemaJSON = json.RawMessage(`123`) },
+		"array schema":   func(d *ToolDefinition) { d.SchemaJSON = json.RawMessage(`[]`) },
 		"bad arg type":   func(d *ToolDefinition) { d.Arguments = []argdecl.Declaration{{Name: "x", Type: "float"}} },
 		"empty arg name": func(d *ToolDefinition) { d.Arguments = []argdecl.Declaration{{Name: "", Type: argdecl.ArgTypeBool}} },
 		"dup arg": func(d *ToolDefinition) {

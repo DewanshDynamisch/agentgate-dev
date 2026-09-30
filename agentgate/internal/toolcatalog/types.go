@@ -40,6 +40,10 @@ func (d ToolDefinition) Validate() error {
 	if len(d.SchemaJSON) == 0 || !json.Valid(d.SchemaJSON) {
 		return fmt.Errorf("toolcatalog: schema_json must be valid JSON")
 	}
+	var schemaObj map[string]json.RawMessage
+	if err := json.Unmarshal(d.SchemaJSON, &schemaObj); err != nil || schemaObj == nil {
+		return fmt.Errorf("toolcatalog: schema_json must be a JSON object")
+	}
 	if _, err := toolregistry.FingerprintSchema(d.SchemaJSON); err != nil {
 		return fmt.Errorf("toolcatalog: schema_json: %w", err)
 	}

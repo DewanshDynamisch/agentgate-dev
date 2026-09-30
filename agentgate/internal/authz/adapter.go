@@ -90,6 +90,22 @@ func (a *Adapter) Adapt(ctx context.Context, checkReq *authv3.CheckRequest) (dec
 		}
 	}
 
+	registry := a.cfg.ToolRegistry
+	argDecls := a.cfg.ArgDeclarations
+	byToolIDOnly := false
+	if a.cfg.Catalog != nil {
+		snap := a.cfg.Catalog.Current()
+		if snap == nil {
+			return decision.Request{}, &AdapterError{
+				ReasonCode: decision.ReasonUnknownTool,
+				Message:    "tool catalog not available",
+			}
+		}
+		registry = snap.Registry
+		argDecls = snap.ArgDecls
+		byToolIDOnly = true
+	}
+
 	httpReq := checkReq.Attributes.Request.Http
 	headers := httpReq.Headers
 	if headers == nil {
@@ -202,7 +218,7 @@ func (a *Adapter) Adapt(ctx context.Context, checkReq *authv3.CheckRequest) (dec
 		ToolName:  toolName,
 	}
 
-	if a.cfg.ToolRegistry == nil {
+	if registry == nil {
 		return decision.Request{}, &AdapterError{
 			ReasonCode: decision.ReasonUnknownTool,
 			Message:    "tool registry not configured",
@@ -217,7 +233,7 @@ func (a *Adapter) Adapt(ctx context.Context, checkReq *authv3.CheckRequest) (dec
 		liveFP = toolregistry.SchemaFingerprint(checkReq.Attributes.ContextExtensions["tool_fingerprint"])
 	}
 
-	govRecord := a.cfg.ToolRegistry.Lookup(toolID, liveFP)
+	govRecord := registry.Lookup(toolID, liveFP)
 	if !govRecord.Known {
 		return decision.Request{}, &AdapterError{
 			ReasonCode: decision.ReasonUnknownTool,
@@ -243,9 +259,9 @@ func (a *Adapter) Adapt(ctx context.Context, checkReq *authv3.CheckRequest) (dec
 	// 6. Argument Resolution
 	var resolvedArgs map[string]argdecl.ResolvedArg
 	var declSet *argdecl.DeclarationSet
-	if ds, ok := a.cfg.ArgDeclarations[toolID.String()]; ok {
+	if ds, ok := argDecls[toolID.String()]; ok {
 		declSet = ds
-	} else if ds, ok := a.cfg.ArgDeclarations[toolName]; ok {
+	} else if ds, ok := argDecls[toolName]; ok && !byToolIDOnly {
 		declSet = ds
 	}
 
