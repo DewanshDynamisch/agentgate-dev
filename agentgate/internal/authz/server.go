@@ -153,6 +153,7 @@ func (s *Server) buildOkResponse(res decision.Result, cred *credential.Credentia
 		})
 	}
 
+	// Verified live (deploy/demo/run-credential-e2e.ps1): agentgateway v1.4.0 honours OVERWRITE on `authorization`, so the backend sees only the minted credential.
 	var toRemove []string
 	if cred != nil {
 		headers = append(headers, &corev3.HeaderValueOption{

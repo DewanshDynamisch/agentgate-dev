@@ -8,7 +8,7 @@ differentiated business meaning: an operator can watch a policy change turn a de
 from denied to allowed, for one role and not another, live.
 
 **Additive, not a replacement.** `deploy/g6` is untouched — this is a separate compose project
-(`demonet` network, ports `+1` on the gateway/agentgate/postgres side, `9200` for the new backend)
+(`demonet` network, ports `+1` on the gateway/agentgate/postgres side, the new backend on `9200` is internal-only, no host port; run `run-credential-e2e.ps1` for the live credential proof)
 that can run alongside it.
 
 ## The scenario: a support ticketing tool

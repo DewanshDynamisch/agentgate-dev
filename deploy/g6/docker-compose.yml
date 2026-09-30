@@ -50,6 +50,9 @@ services:
       AGENTGATE_LOG_LEVEL: "debug"
       AGENTGATE_ADMIN_TOKEN: "${AGENTGATE_ADMIN_TOKEN:-agentgate-admin-secret-dev}"
       AGENTGATE_AUDIT_SALT: "${AGENTGATE_AUDIT_SALT:-audit-salt-g6-dev-fixture}"
+      # G6 backend (probe-mcp) does not verify credentials; no signing key here.
+      AGENTGATE_CREDENTIAL_AUDIENCES: "mcp-probe=probe"
+      AGENTGATE_REQUIRE_DOWNSTREAM_CREDENTIAL: "false"
       AGENTGATE_DATABASE_URL: "${AGENTGATE_DATABASE_URL:-postgres://${POSTGRES_USER:-agentgate}:${POSTGRES_PASSWORD:-agentgate-dev-password}@postgres:5432/${POSTGRES_DB:-agentgate_db}?sslmode=disable}"
     depends_on:
       postgres:
