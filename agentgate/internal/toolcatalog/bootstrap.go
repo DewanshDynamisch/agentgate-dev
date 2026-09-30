@@ -16,12 +16,12 @@ type bootstrapFile struct {
 }
 
 type bootstrapTool struct {
-	BackendID   string            `json:"backend_id"`
-	ToolName    string            `json:"tool_name"`
-	Risk        string            `json:"risk"`
-	Schema      json.RawMessage   `json:"schema"`
+	BackendID   string              `json:"backend_id"`
+	ToolName    string              `json:"tool_name"`
+	Risk        string              `json:"risk"`
+	Schema      json.RawMessage     `json:"schema"`
 	Arguments   []bootstrapArgument `json:"arguments"`
-	Description string            `json:"description"`
+	Description string              `json:"description"`
 }
 
 type bootstrapArgument struct {

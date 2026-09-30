@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -184,6 +185,8 @@ func (h *Handler) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	h.catalogMu.Lock()
+	defer h.catalogMu.Unlock()
 	prev, err := h.toolCatalog.Store.Get(ctx, backendID, toolName)
 	if err != nil && !errors.Is(err, toolcatalog.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read existing tool")
@@ -194,8 +197,7 @@ func (h *Handler) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.toolCatalog.Catalog.Reload(ctx, h.toolCatalog.Store); err != nil {
-		h.rollbackTool(ctx, prev, backendID, toolName)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to reload tool catalog")
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", h.reloadFailureMessage(ctx, prev, backendID, toolName))
 		return
 	}
 
@@ -214,8 +216,14 @@ func (h *Handler) handleCatalogDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	h.catalogMu.Lock()
+	defer h.catalogMu.Unlock()
 	prev, err := h.toolCatalog.Store.Get(ctx, backendID, toolName)
-	if err != nil && !errors.Is(err, toolcatalog.ErrNotFound) {
+	if err != nil {
+		if errors.Is(err, toolcatalog.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "tool not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read existing tool")
 		return
 	}
@@ -224,8 +232,7 @@ func (h *Handler) handleCatalogDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.toolCatalog.Catalog.Reload(ctx, h.toolCatalog.Store); err != nil {
-		h.rollbackTool(ctx, prev, backendID, toolName)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to reload tool catalog")
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", h.reloadFailureMessage(ctx, prev, backendID, toolName))
 		return
 	}
 
@@ -233,16 +240,24 @@ func (h *Handler) handleCatalogDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// rollbackTool restores the pre-mutation state of one definition. It uses a
-// context detached from request cancellation so a client disconnect cannot
-// leave the store diverged from the live snapshot.
-func (h *Handler) rollbackTool(ctx context.Context, prev *toolcatalog.ToolDefinition, backendID, toolName string) {
+// reloadFailureMessage rolls back the failed mutation and returns the client
+// message. The rollback uses a context detached from request cancellation so a
+// client disconnect cannot leave the store diverged from the live snapshot.
+func (h *Handler) reloadFailureMessage(ctx context.Context, prev *toolcatalog.ToolDefinition, backendID, toolName string) string {
+	if err := h.rollbackTool(ctx, prev, backendID, toolName); err != nil {
+		slog.Error("tool catalog rollback failed; store and live catalog may disagree",
+			"backend_id", backendID, "tool_name", toolName, "err", err)
+		return "failed to reload tool catalog; rollback failed; catalog may be inconsistent"
+	}
+	return "failed to reload tool catalog"
+}
+
+func (h *Handler) rollbackTool(ctx context.Context, prev *toolcatalog.ToolDefinition, backendID, toolName string) error {
 	rctx := context.WithoutCancel(ctx)
 	if prev != nil {
-		_ = h.toolCatalog.Store.Upsert(rctx, *prev)
-		return
+		return h.toolCatalog.Store.Upsert(rctx, *prev)
 	}
-	_ = h.toolCatalog.Store.Delete(rctx, backendID, toolName)
+	return h.toolCatalog.Store.Delete(rctx, backendID, toolName)
 }
 
 func (h *Handler) emitToolMutation(ctx context.Context, action auditevents.MutationAction, backendID, toolName string) {

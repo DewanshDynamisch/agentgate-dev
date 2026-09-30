@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
@@ -23,6 +24,7 @@ type Handler struct {
 	auditStore     audit.Store
 	toolRegistry   *toolregistry.Registry
 	toolCatalog    ToolCatalogService
+	catalogMu      sync.Mutex
 	adminToken     string
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
@@ -109,11 +110,26 @@ func TestCatalogAPI_BodyCannotOverridePathIdentity(t *testing.T) {
 	f := newCatFixture(t)
 	body := `{"backend_id":"evil","tool_name":"evil","risk":"read","schema":{"type":"object"}}`
 	resp, b := f.do(t, "PUT", "/api/v1/tools/be/t1", catToken, body)
-	if resp.StatusCode != 200 && resp.StatusCode != 400 {
+	if resp.StatusCode != 200 {
 		t.Fatalf("unexpected %d %s", resp.StatusCode, b)
+	}
+	if _, err := f.store.Get(context.Background(), "be", "t1"); err != nil {
+		t.Fatalf("path identity missing: %v", err)
 	}
 	if _, err := f.store.Get(context.Background(), "evil", "evil"); err == nil {
 		t.Fatal("body identity was honored")
+	}
+}
+
+func TestCatalogAPI_DeleteMissingIs404AndUnaudited(t *testing.T) {
+	f := newCatFixture(t)
+	resp, _ := f.do(t, "DELETE", "/api/v1/tools/be/nope", catToken, "")
+	if resp.StatusCode != 404 {
+		t.Fatalf("got %d", resp.StatusCode)
+	}
+	recs, _ := f.audit.ListRecords(context.Background(), catalogAuditWorkspace, 10)
+	if len(recs) != 0 {
+		t.Fatalf("unexpected audit records: %d", len(recs))
 	}
 }
 
@@ -276,5 +292,104 @@ func TestCatalogAPI_NotConfiguredIs501(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("got %d", resp.StatusCode)
+	}
+}
+
+type flakyStore struct {
+	*toolcatalog.MemoryStore
+	mu          sync.Mutex
+	lists       int
+	upserts     int
+	failEveryN  int
+	failUpsertN int
+}
+
+func (s *flakyStore) List(ctx context.Context) ([]toolcatalog.ToolDefinition, error) {
+	s.mu.Lock()
+	s.lists++
+	fail := s.failEveryN > 0 && s.lists%s.failEveryN == 0
+	s.mu.Unlock()
+	if fail {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return s.MemoryStore.List(ctx)
+}
+
+func (s *flakyStore) Upsert(ctx context.Context, d toolcatalog.ToolDefinition) error {
+	s.mu.Lock()
+	s.upserts++
+	fail := s.failUpsertN > 0 && s.upserts == s.failUpsertN
+	s.mu.Unlock()
+	if fail {
+		return io.ErrClosedPipe
+	}
+	return s.MemoryStore.Upsert(ctx, d)
+}
+
+func TestCatalogAPI_ConcurrentWritesKeepStoreAndSnapshotConsistent(t *testing.T) {
+	mgr := policymanager.New(policystore.NewMemoryStore())
+	store := &flakyStore{MemoryStore: toolcatalog.NewMemoryStore(), failEveryN: 3}
+	cat, _ := toolcatalog.NewCatalog(nil)
+	h := NewHandlerWithCatalog(mgr, catToken, nil, audit.NewMemoryStore(), ToolCatalogService{Store: store, Catalog: cat})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	f := &catFixture{ts: ts}
+
+	risks := []string{"read", "write", "destructive"}
+	var wg sync.WaitGroup
+	for i := 0; i < 60; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%7 == 6 {
+				f.do(t, "DELETE", "/api/v1/tools/be/t", catToken, "")
+				return
+			}
+			body := strings.Replace(putBody, `"risk":"write"`, `"risk":"`+risks[i%3]+`"`, 1)
+			f.do(t, "PUT", "/api/v1/tools/be/t", catToken, body)
+		}(i)
+	}
+	wg.Wait()
+
+	def, err := store.MemoryStore.Get(context.Background(), "be", "t")
+	var live *string
+	for _, r := range cat.Current().Registry.List() {
+		if r.ToolID.BackendID == "be" && r.ToolID.ToolName == "t" {
+			risk := string(r.Risk)
+			live = &risk
+		}
+	}
+	switch {
+	case err != nil && live != nil:
+		t.Fatalf("store empty but snapshot has tool (%s)", *live)
+	case err == nil && live == nil:
+		t.Fatalf("store has tool (%s) but snapshot empty", def.Risk)
+	case err == nil && string(def.Risk) != *live:
+		t.Fatalf("store risk %s != snapshot risk %s", def.Risk, *live)
+	}
+}
+
+func TestCatalogAPI_RollbackFailureIsSurfaced(t *testing.T) {
+	mgr := policymanager.New(policystore.NewMemoryStore())
+	store := &flakyStore{MemoryStore: toolcatalog.NewMemoryStore()}
+	cat, _ := toolcatalog.NewCatalog(nil)
+	h := NewHandlerWithCatalog(mgr, catToken, nil, audit.NewMemoryStore(), ToolCatalogService{Store: store, Catalog: cat})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	f := &catFixture{ts: ts}
+
+	f.do(t, "PUT", "/api/v1/tools/be/t", catToken, putBody)
+	store.mu.Lock()
+	store.failEveryN = 1
+	store.failUpsertN = store.upserts + 2 // the rollback upsert
+	store.mu.Unlock()
+	upd := strings.Replace(putBody, `"risk":"write"`, `"risk":"destructive"`, 1)
+	resp, b := f.do(t, "PUT", "/api/v1/tools/be/t", catToken, upd)
+	if resp.StatusCode != 500 || !strings.Contains(string(b), "rollback failed; catalog may be inconsistent") {
+		t.Fatalf("got %d %s", resp.StatusCode, b)
 	}
 }
