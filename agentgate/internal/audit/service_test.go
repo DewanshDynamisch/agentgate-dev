@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
+	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 )
 
@@ -248,5 +249,153 @@ func TestAuditedDecisionService_ExactPolicyHashProvenance(t *testing.T) {
 	}
 	if recordDeny.PolicyVersion != "" || recordDeny.PolicyHash != "" {
 		t.Fatalf("pre-Cedar denial must not carry policy provenance: version=%q hash=%q", recordDeny.PolicyVersion, recordDeny.PolicyHash)
+	}
+}
+
+type fakeIssuer struct {
+	calls int
+	cred  credential.Credential
+	err   error
+}
+
+func (f *fakeIssuer) Issue(_ context.Context, _ decision.Request, _ decision.Result) (credential.Credential, error) {
+	f.calls++
+	return f.cred, f.err
+}
+
+type failAppendStore struct{ audit.Store }
+
+func (failAppendStore) AppendDecision(context.Context, audit.DecisionRecord) (*audit.StoredRecord, error) {
+	return nil, errors.New("append failed")
+}
+
+func credTestReq(ws, exec string) decision.Request {
+	return decision.Request{
+		ExecutionID:    exec,
+		WorkspaceID:    ws,
+		Identity:       decision.Identity{AgentID: "agent-1", Roles: []string{"reader"}},
+		Tool:           decision.ToolRef{BackendID: "b1", Name: "t1"},
+		Classification: decision.ToolClassification{Known: true, Risk: "read"},
+	}
+}
+
+func allowEvaluator() *mockEvaluator {
+	return &mockEvaluator{result: decision.Result{Decision: decision.Allow, Reason: decision.ReasonPolicyAllow, PolicyVersion: "v1"}}
+}
+
+func TestEvaluateWithCredential_AllowIssuesAndRecordsRef(t *testing.T) {
+	ctx := context.Background()
+	store := audit.NewMemoryStore()
+	iss := &fakeIssuer{cred: credential.Credential{HeaderName: "Authorization", HeaderValue: "Bearer tok", Ref: "ref-1"}}
+	svc := audit.NewAuditedDecisionService(allowEvaluator(), store, nil)
+	svc.SetIssuer(iss)
+
+	res, cred, err := svc.EvaluateWithCredential(ctx, credTestReq("ws-c1", "e1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != decision.Allow || cred == nil || cred.Ref != "ref-1" || cred.HeaderValue != "Bearer tok" {
+		t.Fatalf("unexpected result: %+v cred=%+v", res, cred)
+	}
+	rec, err := store.GetLatestRecord(ctx, "ws-c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.DownstreamCredentialRef != "ref-1" || rec.Decision != "ALLOW" {
+		t.Fatalf("record mismatch: %+v", rec)
+	}
+	vr, err := audit.NewChainVerifier().VerifyWorkspace(ctx, store, "ws-c1")
+	if err != nil || !vr.Valid {
+		t.Fatalf("chain invalid: %+v err=%v", vr, err)
+	}
+}
+
+func TestEvaluateWithCredential_IssueFailureDenies(t *testing.T) {
+	ctx := context.Background()
+	store := audit.NewMemoryStore()
+	iss := &fakeIssuer{err: errors.New("signer down")}
+	svc := audit.NewAuditedDecisionService(allowEvaluator(), store, nil)
+	svc.SetIssuer(iss)
+
+	res, cred, err := svc.EvaluateWithCredential(ctx, credTestReq("ws-c2", "e2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != decision.Deny || res.Reason != decision.ReasonCredentialIssuanceFailure || cred != nil {
+		t.Fatalf("expected credential_issuance_failure deny, got %+v cred=%+v", res, cred)
+	}
+	if res.PolicyVersion != "v1" || res.ExecutionID != "e2" {
+		t.Fatalf("provenance lost: %+v", res)
+	}
+	rec, err := store.GetLatestRecord(ctx, "ws-c2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Decision != "DENY" || rec.Reason != string(decision.ReasonCredentialIssuanceFailure) || rec.DownstreamCredentialRef != "" {
+		t.Fatalf("record mismatch: %+v", rec)
+	}
+	vr, err := audit.NewChainVerifier().VerifyWorkspace(ctx, store, "ws-c2")
+	if err != nil || !vr.Valid {
+		t.Fatalf("chain invalid: %+v err=%v", vr, err)
+	}
+}
+
+func TestEvaluateWithCredential_DenyNeverIssues(t *testing.T) {
+	ev := &mockEvaluator{result: decision.Result{Decision: decision.Deny, Reason: decision.ReasonUnknownTool}}
+	iss := &fakeIssuer{cred: credential.Credential{Ref: "x"}}
+	svc := audit.NewAuditedDecisionService(ev, audit.NewMemoryStore(), nil)
+	svc.SetIssuer(iss)
+
+	res, cred, err := svc.EvaluateWithCredential(context.Background(), credTestReq("ws-c3", "e3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != decision.Deny || cred != nil || iss.calls != 0 {
+		t.Fatalf("issuer must not run on deny: res=%+v cred=%+v calls=%d", res, cred, iss.calls)
+	}
+}
+
+func TestEvaluateWithCredential_NoIssuerUnchanged(t *testing.T) {
+	ctx := context.Background()
+	store := audit.NewMemoryStore()
+	svc := audit.NewAuditedDecisionService(allowEvaluator(), store, nil)
+
+	res, cred, err := svc.EvaluateWithCredential(ctx, credTestReq("ws-c4", "e4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != decision.Allow || cred != nil {
+		t.Fatalf("unexpected: %+v cred=%+v", res, cred)
+	}
+	rec, _ := store.GetLatestRecord(ctx, "ws-c4")
+	if rec.DownstreamCredentialRef != "" {
+		t.Fatalf("ref must be empty: %+v", rec)
+	}
+}
+
+func TestEvaluateWithCredential_AppendFailureDiscardsCredential(t *testing.T) {
+	iss := &fakeIssuer{cred: credential.Credential{Ref: "ref-5", HeaderValue: "Bearer tok"}}
+	svc := audit.NewAuditedDecisionService(allowEvaluator(), failAppendStore{audit.NewMemoryStore()}, nil)
+	svc.SetIssuer(iss)
+
+	res, cred, err := svc.EvaluateWithCredential(context.Background(), credTestReq("ws-c5", "e5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.calls != 1 {
+		t.Fatalf("issuer should have run, calls=%d", iss.calls)
+	}
+	if res.Decision != decision.Deny || res.Reason != decision.ReasonEvaluationError || cred != nil {
+		t.Fatalf("expected deny with nil credential, got %+v cred=%+v", res, cred)
+	}
+}
+
+func TestEvaluate_WrapperDiscardsCredential(t *testing.T) {
+	iss := &fakeIssuer{cred: credential.Credential{Ref: "ref-6"}}
+	svc := audit.NewAuditedDecisionService(allowEvaluator(), audit.NewMemoryStore(), nil)
+	svc.SetIssuer(iss)
+	res, err := svc.Evaluate(context.Background(), credTestReq("ws-c6", "e6"))
+	if err != nil || res.Decision != decision.Allow {
+		t.Fatalf("unexpected: %+v err=%v", res, err)
 	}
 }

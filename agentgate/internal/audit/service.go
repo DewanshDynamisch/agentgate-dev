@@ -3,10 +3,12 @@ package audit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/auditevents"
+	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 )
 
@@ -27,6 +29,7 @@ type AuditedDecisionService struct {
 	evaluator DecisionEvaluator
 	store     Store
 	redactor  *Redactor
+	issuer    credential.Issuer
 	mu        sync.Mutex
 }
 
@@ -54,9 +57,24 @@ func (s *AuditedDecisionService) SetEvaluator(evaluator DecisionEvaluator) {
 	s.evaluator = evaluator
 }
 
-// Evaluate evaluates the request and durably persists the audit record.
-// Crucially, if evaluating produces ALLOW but the audit write fails, it FAILS CLOSED (returns DENY with ReasonEvaluationError).
+// SetIssuer sets the downstream credential issuer; nil disables issuance.
+func (s *AuditedDecisionService) SetIssuer(issuer credential.Issuer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.issuer = issuer
+}
+
+// Evaluate evaluates the request and durably persists the audit record, discarding any issued credential.
 func (s *AuditedDecisionService) Evaluate(ctx context.Context, req decision.Request) (decision.Result, error) {
+	res, _, err := s.EvaluateWithCredential(ctx, req)
+	return res, err
+}
+
+// EvaluateWithCredential evaluates the request, issues a downstream credential for an ALLOW
+// before the audit append, and durably persists the audit record. It FAILS CLOSED: if issuance
+// fails the decision becomes DENY; if the audit write fails the decision becomes DENY and the
+// credential is discarded. A credential is returned only with a final ALLOW.
+func (s *AuditedDecisionService) EvaluateWithCredential(ctx context.Context, req decision.Request) (decision.Result, *credential.Credential, error) {
 	// 1. Evaluate request against active policy
 	var res decision.Result
 	if s.evaluator != nil {
@@ -97,6 +115,27 @@ func (s *AuditedDecisionService) Evaluate(ctx context.Context, req decision.Requ
 		res.PolicyVersion = policyVersion
 	}
 
+	s.mu.Lock()
+	issuer := s.issuer
+	s.mu.Unlock()
+
+	var cred *credential.Credential
+	if res.Decision == decision.Allow && issuer != nil {
+		c, issueErr := issuer.Issue(ctx, req, res)
+		if issueErr != nil {
+			slog.Warn("downstream credential issuance failed", "execution_id", req.ExecutionID, "workspace_id", req.WorkspaceID, "error", issueErr)
+			res = decision.Result{
+				Decision:      decision.Deny,
+				Reason:        decision.ReasonCredentialIssuanceFailure,
+				Message:       "downstream credential issuance failed",
+				ExecutionID:   res.ExecutionID,
+				PolicyVersion: res.PolicyVersion,
+			}
+		} else {
+			cred = &c
+		}
+	}
+
 	// 3. Redact arguments prior to canonicalization or persistence
 	redactedArgs := s.redactor.RedactArguments(req.Tool.Name, req.Arguments)
 
@@ -128,6 +167,9 @@ func (s *AuditedDecisionService) Evaluate(ctx context.Context, req decision.Requ
 		RedactedArguments:   redactedArgs,
 		PrevHash:            prevHash,
 	}
+	if cred != nil {
+		record.DownstreamCredentialRef = cred.Ref
+	}
 
 	canonical, err := ComputeCanonicalPayload(record)
 	if err != nil {
@@ -139,9 +181,9 @@ func (s *AuditedDecisionService) Evaluate(ctx context.Context, req decision.Requ
 				Message:       fmt.Sprintf("audit canonicalization error: %v", err),
 				ExecutionID:   req.ExecutionID,
 				PolicyVersion: res.PolicyVersion,
-			}, nil
+			}, nil, nil
 		}
-		return res, nil
+		return res, nil, nil
 	}
 
 	record.CanonicalPayload = string(canonical)
@@ -159,13 +201,13 @@ func (s *AuditedDecisionService) Evaluate(ctx context.Context, req decision.Requ
 				Message:       fmt.Sprintf("audit failure: unable to durably record ALLOW decision: %v", appendErr),
 				ExecutionID:   req.ExecutionID,
 				PolicyVersion: res.PolicyVersion,
-			}, nil
+			}, nil, nil
 		}
 		// If DENY: safe to return DENY since security is preserved
-		return res, nil
+		return res, nil, nil
 	}
 
-	return res, nil
+	return res, cred, nil
 }
 
 // OnMutation records a policy mutation into the audit trail, implementing auditevents.MutationListener.
