@@ -15,7 +15,11 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -44,17 +48,35 @@ type InvocationRecord struct {
 	Arguments  map[string]any    `json:"arguments"`
 	Headers    map[string]string `json:"headers"`
 	RawRequest string            `json:"raw_request"`
+
+	CredentialSub string `json:"credential_sub"`
+	CredentialAct string `json:"credential_act"`
+	CredentialJTI string `json:"credential_jti"`
+}
+
+// ServerConfig controls credential enforcement on tools/call.
+type ServerConfig struct {
+	RequireCredential bool
+	Verifier          *Verifier
 }
 
 type Server struct {
 	mu          sync.Mutex
 	tickets     map[string]*Ticket
 	invocations []InvocationRecord
+	cfg         ServerConfig
 }
 
+// NewServer returns a server that does not require credentials. Test use only;
+// main() builds its config from the environment and requires them by default.
 func NewServer() *Server {
+	return NewServerWithConfig(ServerConfig{})
+}
+
+func NewServerWithConfig(cfg ServerConfig) *Server {
 	s := &Server{
 		tickets: make(map[string]*Ticket),
+		cfg:     cfg,
 	}
 	s.seed()
 	return s
@@ -195,9 +217,14 @@ func (s *Server) Handler() http.Handler {
 
 		headers := make(map[string]string)
 		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
+			if len(v) == 0 {
+				continue
 			}
+			if http.CanonicalHeaderKey(k) == "Authorization" {
+				headers[k] = redactAuthorization(v[0])
+				continue
+			}
+			headers[k] = v[0]
 		}
 
 		switch req.Method {
@@ -216,7 +243,7 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": toolSchemas}})
 
 		case "tools/call":
-			s.handleToolCall(w, req, bodyBytes, headers)
+			s.handleToolCall(r.Context(), w, req, bodyBytes, headers, r.Header.Get("Authorization"))
 
 		default:
 			writeJSON(w, jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonrpcError{Code: -32601, Message: fmt.Sprintf("method %q not found", req.Method)}})
@@ -226,7 +253,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) handleToolCall(w http.ResponseWriter, req jsonrpcRequest, rawBody []byte, headers map[string]string) {
+func (s *Server) handleToolCall(ctx context.Context, w http.ResponseWriter, req jsonrpcRequest, rawBody []byte, headers map[string]string, authorization string) {
 	var callParams struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -236,12 +263,31 @@ func (s *Server) handleToolCall(w http.ResponseWriter, req jsonrpcRequest, rawBo
 		return
 	}
 
+	var claims Claims
+	if s.cfg.RequireCredential {
+		var err error
+		if s.cfg.Verifier == nil {
+			err = errors.New("credential verification not configured")
+		} else {
+			claims, err = s.cfg.Verifier.Verify(ctx, authorization, callParams.Name)
+		}
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonrpcError{Code: -32001, Message: "unauthorized: " + err.Error()}})
+			return
+		}
+	}
+
 	s.recordInvocation(InvocationRecord{
-		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
-		ToolName:   callParams.Name,
-		Arguments:  callParams.Arguments,
-		Headers:    headers,
-		RawRequest: string(rawBody),
+		Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
+		ToolName:      callParams.Name,
+		Arguments:     callParams.Arguments,
+		Headers:       headers,
+		RawRequest:    string(rawBody),
+		CredentialSub: claims.Sub,
+		CredentialAct: claims.Act,
+		CredentialJTI: claims.JTI,
 	})
 
 	switch callParams.Name {
@@ -299,6 +345,33 @@ func (s *Server) handleToolCall(w http.ResponseWriter, req jsonrpcRequest, rawBo
 	}
 }
 
+func redactAuthorization(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return "<redacted:sha256:" + hex.EncodeToString(sum[:])[:12] + ">"
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func configFromEnv() ServerConfig {
+	require := true
+	if v := strings.ToLower(os.Getenv("DEMO_MCP_REQUIRE_CREDENTIAL")); v == "false" || v == "0" {
+		require = false
+	}
+	cfg := ServerConfig{RequireCredential: require}
+	if url := os.Getenv("DEMO_MCP_JWKS_URL"); url != "" {
+		cfg.Verifier = NewVerifier(url,
+			envOr("DEMO_MCP_CRED_ISSUER", "agentgate"),
+			envOr("DEMO_MCP_CRED_AUDIENCE", "support-desk"),
+			&http.Client{Timeout: jwksHTTPTimeout})
+	}
+	return cfg
+}
+
 func writeJSON(w http.ResponseWriter, resp jsonrpcResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -310,7 +383,11 @@ func main() {
 		port = "9200"
 	}
 
-	server := NewServer()
+	cfg := configFromEnv()
+	if cfg.RequireCredential && cfg.Verifier == nil {
+		log.Printf("WARNING: DEMO_MCP_REQUIRE_CREDENTIAL is on but DEMO_MCP_JWKS_URL is unset; all tools/call requests will be rejected")
+	}
+	server := NewServerWithConfig(cfg)
 	log.Printf("support-desk-mcp listening on :%s (3 tools: list_tickets [read], update_ticket_status [write], delete_ticket [destructive])", port)
 	if err := http.ListenAndServe(":"+port, server.Handler()); err != nil {
 		log.Fatalf("server failed: %v", err)
