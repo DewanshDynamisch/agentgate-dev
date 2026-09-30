@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -122,6 +123,9 @@ func (s *AuditedDecisionService) EvaluateWithCredential(ctx context.Context, req
 	var cred *credential.Credential
 	if res.Decision == decision.Allow && issuer != nil {
 		c, issueErr := issuer.Issue(ctx, req, res)
+		if issueErr == nil && (c.Ref == "" || c.HeaderValue == "") {
+			issueErr = errors.New("issuer returned credential with empty ref or value")
+		}
 		if issueErr != nil {
 			slog.Warn("downstream credential issuance failed", "execution_id", req.ExecutionID, "workspace_id", req.WorkspaceID, "error", issueErr)
 			res = decision.Result{

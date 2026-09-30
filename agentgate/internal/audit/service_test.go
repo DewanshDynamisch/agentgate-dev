@@ -391,11 +391,45 @@ func TestEvaluateWithCredential_AppendFailureDiscardsCredential(t *testing.T) {
 }
 
 func TestEvaluate_WrapperDiscardsCredential(t *testing.T) {
-	iss := &fakeIssuer{cred: credential.Credential{Ref: "ref-6"}}
+	iss := &fakeIssuer{cred: credential.Credential{HeaderValue: "Bearer tok", Ref: "ref-6"}}
 	svc := audit.NewAuditedDecisionService(allowEvaluator(), audit.NewMemoryStore(), nil)
 	svc.SetIssuer(iss)
 	res, err := svc.Evaluate(context.Background(), credTestReq("ws-c6", "e6"))
 	if err != nil || res.Decision != decision.Allow {
 		t.Fatalf("unexpected: %+v err=%v", res, err)
+	}
+}
+
+func TestEvaluateWithCredential_InvalidCredentialDenies(t *testing.T) {
+	cases := map[string]credential.Credential{
+		"empty ref":   {HeaderName: "Authorization", HeaderValue: "Bearer tok"},
+		"empty value": {HeaderName: "Authorization", Ref: "ref-x"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			store := audit.NewMemoryStore()
+			svc := audit.NewAuditedDecisionService(allowEvaluator(), store, nil)
+			svc.SetIssuer(&fakeIssuer{cred: c})
+
+			res, cred, err := svc.EvaluateWithCredential(ctx, credTestReq("ws-inv", "e-inv"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Decision != decision.Deny || res.Reason != decision.ReasonCredentialIssuanceFailure || cred != nil {
+				t.Fatalf("expected credential_issuance_failure deny, got %+v cred=%+v", res, cred)
+			}
+			rec, err := store.GetLatestRecord(ctx, "ws-inv")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Decision != "DENY" || rec.Reason != string(decision.ReasonCredentialIssuanceFailure) || rec.DownstreamCredentialRef != "" {
+				t.Fatalf("record mismatch: %+v", rec)
+			}
+			vr, err := audit.NewChainVerifier().VerifyWorkspace(ctx, store, "ws-inv")
+			if err != nil || !vr.Valid {
+				t.Fatalf("chain invalid: %+v err=%v", vr, err)
+			}
+		})
 	}
 }
