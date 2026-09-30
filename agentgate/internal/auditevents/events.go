@@ -18,6 +18,12 @@ const (
 
 	// ActionCreateCandidate indicates a new candidate was created.
 	ActionCreateCandidate MutationAction = "create_candidate"
+
+	// ActionToolUpserted indicates a tool catalog definition was created or replaced.
+	ActionToolUpserted MutationAction = "tool_upserted"
+
+	// ActionToolDeleted indicates a tool catalog definition was removed.
+	ActionToolDeleted MutationAction = "tool_deleted"
 )
 
 // MutationEvent represents a single policy lifecycle mutation for audit purposes.

@@ -16,7 +16,6 @@ import (
 	"syscall"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/apidocs"
-	"github.com/Dynamisch-LLC/agentgate/internal/argdecl"
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
 	"github.com/Dynamisch-LLC/agentgate/internal/authz"
 	"github.com/Dynamisch-LLC/agentgate/internal/config"
@@ -29,7 +28,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/logging"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
-	"github.com/Dynamisch-LLC/agentgate/internal/toolregistry"
+	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc"
 )
@@ -58,6 +57,7 @@ func run() error {
 
 	var store policystore.Store
 	var auditStore audit.Store
+	var toolStore toolcatalog.Store
 	if cfg.DatabaseURL != "" {
 		pgStore, err := policystore.NewPostgresStore(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -81,6 +81,13 @@ func run() error {
 		}
 		auditStore = pgAuditStore
 
+		pgToolStore, err := toolcatalog.NewPostgresStore(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("connect postgres tool catalog store: %w", err)
+		}
+		defer pgToolStore.Close()
+		toolStore = pgToolStore
+
 		srv.SetReadinessCheck(pgStore.Ping)
 		logger.Info("connected to persistent postgres policy and audit store")
 	} else {
@@ -88,6 +95,7 @@ func run() error {
 		defer store.Close()
 		auditStore = audit.NewMemoryStore()
 		defer auditStore.Close()
+		toolStore = toolcatalog.NewMemoryStore()
 		logger.Info("using in-memory policy and audit store")
 	}
 
@@ -107,6 +115,11 @@ func run() error {
 		}
 	}
 
+	toolCatalog, err := loadToolCatalog(context.Background(), cfg, toolStore, logger)
+	if err != nil {
+		return err
+	}
+
 	// Build ext_authz adapter components
 	identityMapper, err := identity.NewMapper(identity.MapperConfig{
 		AgentIDClaim:    "sub",
@@ -117,125 +130,14 @@ func run() error {
 		return fmt.Errorf("init identity mapper: %w", err)
 	}
 
-	readStatusSchema := []byte(`{"type":"object","properties":{"verbose":{"type":"boolean"}}}`)
-	readStatusFP, _ := toolregistry.FingerprintSchema(readStatusSchema)
-
-	writeStatusSchema := []byte(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}}}`)
-	writeStatusFP, _ := toolregistry.FingerprintSchema(writeStatusSchema)
-
-	// G7 Task B demo tools (deploy/demo/support-desk-mcp) — additive, alongside the
-	// existing G6 probe tools above, not a replacement. Registered under the same
-	// "mcp-probe"/"default" backend_id namespace: BackendID here is a governance
-	// namespace key, not a physical binding to any one backend process, and none
-	// of these tool names collide with the existing read_status/write_status/
-	// admin_action entries. This is a necessary consequence of a pre-existing gap,
-	// not a new one: internal/toolregistry.Registry is still a hardcoded,
-	// startup-loaded list (no persistent store) — already tracked as Backend work
-	// blocking G9's multi-backend topology in docs/PHASES/PROGRESS_AND_ROADMAP.md §3.
-	listTicketsSchema := []byte(`{"type":"object","properties":{"status_filter":{"type":"string"}}}`)
-	listTicketsFP, _ := toolregistry.FingerprintSchema(listTicketsSchema)
-
-	updateTicketSchema := []byte(`{"type":"object","properties":{"ticket_id":{"type":"string"},"new_status":{"type":"string"}}}`)
-	updateTicketFP, _ := toolregistry.FingerprintSchema(updateTicketSchema)
-
-	deleteTicketSchema := []byte(`{"type":"object","properties":{"ticket_id":{"type":"string"}}}`)
-	deleteTicketFP, _ := toolregistry.FingerprintSchema(deleteTicketSchema)
-
-	toolReg, err := toolregistry.NewRegistry([]toolregistry.RegistryEntry{
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "read_status"},
-			Risk:                  toolregistry.RiskRead,
-			RegisteredFingerprint: readStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "read_status"},
-			Risk:                  toolregistry.RiskRead,
-			RegisteredFingerprint: readStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "write_status"},
-			Risk:                  toolregistry.RiskWrite,
-			RegisteredFingerprint: writeStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "write_status"},
-			Risk:                  toolregistry.RiskWrite,
-			RegisteredFingerprint: writeStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "admin_action"},
-			Risk:                  toolregistry.RiskDestructive,
-			RegisteredFingerprint: readStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "admin_action"},
-			Risk:                  toolregistry.RiskDestructive,
-			RegisteredFingerprint: readStatusFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "list_tickets"},
-			Risk:                  toolregistry.RiskRead,
-			RegisteredFingerprint: listTicketsFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "list_tickets"},
-			Risk:                  toolregistry.RiskRead,
-			RegisteredFingerprint: listTicketsFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "update_ticket_status"},
-			Risk:                  toolregistry.RiskWrite,
-			RegisteredFingerprint: updateTicketFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "update_ticket_status"},
-			Risk:                  toolregistry.RiskWrite,
-			RegisteredFingerprint: updateTicketFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "mcp-probe", ToolName: "delete_ticket"},
-			Risk:                  toolregistry.RiskDestructive,
-			RegisteredFingerprint: deleteTicketFP,
-		},
-		{
-			ToolID:                toolregistry.ToolID{BackendID: "default", ToolName: "delete_ticket"},
-			Risk:                  toolregistry.RiskDestructive,
-			RegisteredFingerprint: deleteTicketFP,
-		},
+	govHandler := govapi.NewHandlerWithCatalog(policyMgr, cfg.AdminToken, govIntegration, auditStore, govapi.ToolCatalogService{
+		Store:    toolStore,
+		Catalog:  toolCatalog,
+		Listener: auditedDecisionSvc,
 	})
-	if err != nil {
-		return fmt.Errorf("init tool registry: %w", err)
-	}
-
-	govHandler := govapi.NewHandler(policyMgr, cfg.AdminToken, govIntegration, auditStore, toolReg)
 	govHandler.RegisterRoutes(srv.Mux())
 	apidocs.RegisterRoutes(srv.Mux())
 	logger.Info("governance API docs available", "path", "/docs")
-
-	readStatusDecls, _ := argdecl.NewDeclarationSet([]argdecl.Declaration{
-		{
-			Name:     "verbose",
-			Type:     argdecl.ArgTypeBool,
-			Required: false,
-		},
-	})
-	writeStatusDecls, _ := argdecl.NewDeclarationSet([]argdecl.Declaration{
-		{
-			Name:     "amount",
-			Type:     argdecl.ArgTypeInt,
-			Required: false,
-		},
-	})
-	listTicketsDecls, _ := argdecl.NewDeclarationSet([]argdecl.Declaration{
-		{Name: "status_filter", Type: argdecl.ArgTypeString, Required: false},
-	})
-	updateTicketDecls, _ := argdecl.NewDeclarationSet([]argdecl.Declaration{
-		{Name: "ticket_id", Type: argdecl.ArgTypeString, Required: true},
-		{Name: "new_status", Type: argdecl.ArgTypeString, Required: true},
-	})
-	deleteTicketDecls, _ := argdecl.NewDeclarationSet([]argdecl.Declaration{
-		{Name: "ticket_id", Type: argdecl.ArgTypeString, Required: true},
-	})
 
 	// In G6 single-workspace integration deployment, AllowStaticWorkspace permits fallback to
 	// "default" when JWT does not declare a workspace_id claim. In multi-tenant environments,
@@ -245,14 +147,7 @@ func run() error {
 		AllowStaticWorkspace: true,
 		DefaultBackendID:     "mcp-probe",
 		IdentityMapper:       identityMapper,
-		ToolRegistry:         toolReg,
-		ArgDeclarations: map[string]*argdecl.DeclarationSet{
-			"read_status":          readStatusDecls,
-			"write_status":         writeStatusDecls,
-			"list_tickets":         listTicketsDecls,
-			"update_ticket_status": updateTicketDecls,
-			"delete_ticket":        deleteTicketDecls,
-		},
+		Catalog:              toolCatalog,
 	})
 
 	signingKey, err := loadSigningKey(cfg, logger)
@@ -317,6 +212,34 @@ func run() error {
 
 	logger.Info("agentgate stopped cleanly")
 	return nil
+}
+
+func loadToolCatalog(ctx context.Context, cfg config.Config, toolStore toolcatalog.Store, logger *slog.Logger) (*toolcatalog.Catalog, error) {
+	if err := toolStore.Migrate(ctx); err != nil {
+		return nil, fmt.Errorf("migrate tool catalog store: %w", err)
+	}
+	if cfg.ToolBootstrapFile != "" {
+		defs, err := toolcatalog.LoadBootstrapFile(cfg.ToolBootstrapFile)
+		if err != nil {
+			return nil, fmt.Errorf("load tool bootstrap file: %w", err)
+		}
+		seeded, err := toolcatalog.SeedIfEmpty(ctx, toolStore, defs, "bootstrap")
+		if err != nil {
+			return nil, fmt.Errorf("seed tool catalog: %w", err)
+		}
+		logger.Info("tool catalog bootstrap processed", "file", cfg.ToolBootstrapFile, "seeded", seeded)
+	}
+	catalog, err := toolcatalog.NewCatalog(nil)
+	if err != nil {
+		return nil, fmt.Errorf("init tool catalog: %w", err)
+	}
+	if err := catalog.Reload(ctx, toolStore); err != nil {
+		return nil, fmt.Errorf("load tool catalog: %w", err)
+	}
+	if len(catalog.Current().Registry.List()) == 0 {
+		logger.Warn("tool catalog is empty; all tool calls will be denied as unknown_tool")
+	}
+	return catalog, nil
 }
 
 func loadSigningKey(cfg config.Config, logger *slog.Logger) (*rsa.PrivateKey, error) {

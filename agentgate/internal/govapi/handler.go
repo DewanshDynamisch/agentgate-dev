@@ -22,6 +22,7 @@ type Handler struct {
 	govIntegration *governanceintegration.GovernanceDecisionService
 	auditStore     audit.Store
 	toolRegistry   *toolregistry.Registry
+	toolCatalog    ToolCatalogService
 	adminToken     string
 }
 
@@ -40,6 +41,14 @@ func NewHandler(manager *policymanager.Manager, adminToken string, govIntegratio
 	}
 }
 
+// NewHandlerWithCatalog constructs a Handler whose tool endpoints are backed by
+// a runtime tool catalog. The catalog snapshot replaces the static registry.
+func NewHandlerWithCatalog(manager *policymanager.Manager, adminToken string, govIntegration *governanceintegration.GovernanceDecisionService, auditStore audit.Store, catalog ToolCatalogService) *Handler {
+	h := NewHandler(manager, adminToken, govIntegration, auditStore, nil)
+	h.toolCatalog = catalog
+	return h
+}
+
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	protect := func(fn http.HandlerFunc) http.HandlerFunc {
@@ -56,6 +65,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies", protect(h.handleCreateCandidate))
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/audit-events", protect(h.handleListAuditEvents))
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/tools", protect(h.handleListTools))
+	mux.HandleFunc("GET /api/v1/tools", protect(h.handleCatalogList))
+	mux.HandleFunc("GET /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogGet))
+	mux.HandleFunc("PUT /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogPut))
+	mux.HandleFunc("DELETE /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogDelete))
 }
 
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
@@ -430,12 +443,18 @@ func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.toolRegistry == nil {
+	source := "static_configuration"
+	var records []toolregistry.GovernanceRecord
+	switch {
+	case h.toolCatalog.Catalog != nil:
+		source = "catalog"
+		records = h.toolCatalog.Catalog.Current().Registry.List()
+	case h.toolRegistry != nil:
+		records = h.toolRegistry.List()
+	default:
 		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "tool registry not configured")
 		return
 	}
-
-	records := h.toolRegistry.List()
 	tools := make([]ToolView, 0, len(records))
 	for _, rec := range records {
 		tools = append(tools, ToolView{
@@ -451,7 +470,7 @@ func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, ToolsResponse{
 		WorkspaceID: workspaceID,
-		Source:      "static_configuration",
+		Source:      source,
 		Tools:       tools,
 	})
 }

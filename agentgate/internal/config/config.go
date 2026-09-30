@@ -59,6 +59,9 @@ type Config struct {
 	// If empty, AgentGate runs with an in-memory policy store.
 	DatabaseURL string
 
+	// ToolBootstrapFile is an optional JSON file that seeds the tool catalog when it is empty.
+	ToolBootstrapFile string
+
 	// CredentialSigningKeyFile is the PEM RSA private key used to sign downstream credentials.
 	CredentialSigningKeyFile string
 	CredentialIssuer         string
@@ -108,6 +111,7 @@ func Load() (Config, error) {
 
 	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", defaultAdminToken)
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
+	cfg.ToolBootstrapFile = strings.TrimSpace(getEnv(envPrefix+"TOOL_BOOTSTRAP_FILE", ""))
 
 	cfg.CredentialSigningKeyFile = getEnv(envPrefix+"CREDENTIAL_SIGNING_KEY_FILE", "")
 	cfg.CredentialIssuer = getEnv(envPrefix+"CREDENTIAL_ISSUER", "agentgate")

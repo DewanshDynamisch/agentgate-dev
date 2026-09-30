@@ -54,10 +54,12 @@ services:
       AGENTGATE_CREDENTIAL_AUDIENCES: "mcp-probe=support-desk,default=support-desk"
       AGENTGATE_CREDENTIAL_SIGNING_KEY_FILE: "/run/secrets/cred_key.pem"
       AGENTGATE_REQUIRE_DOWNSTREAM_CREDENTIAL: "true"
+      AGENTGATE_TOOL_BOOTSTRAP_FILE: "/etc/agentgate/tools.bootstrap.json"
       AGENTGATE_DATABASE_URL: "${AGENTGATE_DATABASE_URL:-postgres://${POSTGRES_USER:-agentgate}:${POSTGRES_PASSWORD:-agentgate-dev-password}@postgres:5432/${POSTGRES_DB:-agentgate_demo_db}?sslmode=disable}"
     volumes:
       # Generated at runtime by run-credential-e2e.ps1; never committed.
       - ./secrets/cred_key.pem:/run/secrets/cred_key.pem:ro
+      - ../shared/tools.bootstrap.json:/etc/agentgate/tools.bootstrap.json:ro
     depends_on:
       postgres:
         condition: service_healthy
