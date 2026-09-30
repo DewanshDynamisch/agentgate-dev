@@ -45,13 +45,24 @@ export function AuditPage() {
   const [nextBefore, setNextBefore] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Distinct error sources so one path's success never hides another path's failure.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [olderError, setOlderError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [decisionFilter, setDecisionFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const inFlight = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Initial load. The cancelled flag prevents state updates after unmount / client change.
   useEffect(() => {
@@ -62,10 +73,10 @@ export function AuditPage() {
         if (cancelled) return;
         setEvents(mergeEvents([], res.events));
         setNextBefore(res.nextBeforeSequence);
-        setError(null);
+        setLoadError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setLoadError(errorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -87,10 +98,11 @@ export function AuditPage() {
         .then((res) => {
           if (cancelled) return;
           setEvents((prev) => mergeEvents(prev, res.events));
-          setError(null);
+          setRefreshError(null);
+          setLoadError(null);
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(errorMessage(err));
+          if (!cancelled) setRefreshError(errorMessage(err));
         })
         .finally(() => {
           inFlight.current = false;
@@ -106,15 +118,16 @@ export function AuditPage() {
   const loadOlder = useCallback(async () => {
     if (nextBefore === undefined) return;
     setLoadingOlder(true);
+    setOlderError(null);
     try {
       const res = await client.listAuditEvents(workspaceId, { limit: PAGE_SIZE, beforeSequence: nextBefore });
+      if (!mounted.current) return;
       setEvents((prev) => mergeEvents(prev, res.events));
       setNextBefore(res.nextBeforeSequence);
-      setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      if (mounted.current) setOlderError(errorMessage(err));
     } finally {
-      setLoadingOlder(false);
+      if (mounted.current) setLoadingOlder(false);
     }
   }, [client, workspaceId, nextBefore]);
 
@@ -129,8 +142,9 @@ export function AuditPage() {
     );
   }, [events, decisionFilter, toolFilter, agentFilter]);
 
-  // Rows are never shown alongside an error banner: no stale or fallback data on failure.
-  const showRows = !loading && !error;
+  // Only an initial load that yielded nothing hides the table; already-loaded rows stay visible.
+  const showRows = !loading && !(loadError && events.length === 0);
+  const errors = [loadError, refreshError, olderError].filter((m): m is string => m !== null);
 
   return (
     <div className="ag-page">
@@ -149,11 +163,11 @@ export function AuditPage() {
         </label>
       </div>
 
-      {error && (
-        <div className="ag-alert ag-alert-error" role="alert">
-          {error}
+      {errors.map((message) => (
+        <div key={message} className="ag-alert ag-alert-error" role="alert">
+          {message}
         </div>
-      )}
+      ))}
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 }}>

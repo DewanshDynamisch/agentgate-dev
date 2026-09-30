@@ -149,6 +149,35 @@ describe('AuditPage', () => {
       expect(screen.getAllByText(/^exec-\d$/).map((n) => n.textContent)).toEqual(['exec-3', 'exec-2', 'exec-1']);
     });
 
+    it('keeps loaded rows visible with a banner when a refresh fails', async () => {
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce(page([event(1)]))
+        .mockRejectedValue(new GovernanceApiError(503, 'UNAVAILABLE', 'refresh failed'));
+      setup(list);
+      await flush();
+      await tick(5000);
+      expect(screen.getByRole('alert')).toHaveTextContent('refresh failed');
+      expect(screen.getByText('crm/tool-1')).toBeInTheDocument();
+    });
+
+    it('keeps a load-older error visible after a later successful refresh', async () => {
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce(page([event(3)], 3))
+        .mockRejectedValueOnce(new GovernanceApiError(500, 'INTERNAL', 'older failed'))
+        .mockResolvedValue(page([event(3)], 3));
+      setup(list);
+      await flush();
+      fireEvent.click(screen.getByRole('button', { name: /load older/i }));
+      await flush();
+      expect(screen.getByRole('alert')).toHaveTextContent('older failed');
+      await tick(5000);
+      expect(list).toHaveBeenCalledTimes(3);
+      expect(screen.getByRole('alert')).toHaveTextContent('older failed');
+      expect(screen.getByText('crm/tool-3')).toBeInTheDocument();
+    });
+
     it('does not poll when auto-refresh is switched off', async () => {
       const list = vi.fn().mockResolvedValue(page([event(1)]));
       setup(list);
