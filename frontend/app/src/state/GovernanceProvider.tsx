@@ -43,6 +43,13 @@ interface GovernanceContextValue {
 
 const GovernanceContext = createContext<GovernanceContextValue | null>(null);
 
+interface GovernanceClientContextValue {
+  client: GovernanceClient;
+  workspaceId: string;
+}
+
+const GovernanceClientContext = createContext<GovernanceClientContextValue | null>(null);
+
 /**
  * Owns one PolicyLifecycleStore instance (from the existing, tested contract
  * layer at frontend/src) for the lifetime of the app. The store class itself
@@ -114,13 +121,28 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
     },
   };
 
-  return <GovernanceContext.Provider value={value}>{children}</GovernanceContext.Provider>;
+  const clientValue = useMemo(() => ({ client, workspaceId: WORKSPACE_ID }), [client]);
+
+  return (
+    <GovernanceClientContext.Provider value={clientValue}>
+      <GovernanceContext.Provider value={value}>{children}</GovernanceContext.Provider>
+    </GovernanceClientContext.Provider>
+  );
 }
 
 export function useGovernance(): GovernanceContextValue {
   const ctx = useContext(GovernanceContext);
   if (!ctx) {
     throw new Error("useGovernance() must be used inside <GovernanceProvider>");
+  }
+  return ctx;
+}
+
+/** The provider-owned GovernanceClient and workspace, for pages that read data the policy store does not hold. */
+export function useGovernanceClient(): GovernanceClientContextValue {
+  const ctx = useContext(GovernanceClientContext);
+  if (!ctx) {
+    throw new Error("useGovernanceClient() must be used inside <GovernanceProvider>");
   }
   return ctx;
 }
