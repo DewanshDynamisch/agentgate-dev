@@ -136,7 +136,8 @@ export function ToolsPage() {
                     <td>{t.arguments.length}</td>
                     <td className="ag-mono">{t.updatedBy || "—"}</td>
                     <td className="ag-mono">{formatTime(t.updatedAt)}</td>
-                    <td style={{ display: "flex", gap: 8 }}>
+                    <td>
+                      <div style={{ display: "flex", gap: 8 }}>
                       <button
                         type="button"
                         className="ag-btn ag-btn-secondary ag-btn-sm"
@@ -153,6 +154,7 @@ export function ToolsPage() {
                       >
                         Delete
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

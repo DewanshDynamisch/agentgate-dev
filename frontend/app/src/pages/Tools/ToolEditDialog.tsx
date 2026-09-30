@@ -6,6 +6,7 @@ import type { ToolArgument, ToolDefinition } from "@contract/models/tools";
 const RISKS = ["read", "write", "destructive"] as const;
 const ARG_TYPES = ["string", "int64", "bool"] as const;
 const DESTRUCTIVE_CONFIRM_LABEL = "I understand this changes authorization for all agents";
+const IDENT_RE = /^[a-zA-Z0-9_.-]{1,128}$/;
 const DEFAULT_SCHEMA = JSON.stringify({ type: "object", properties: {} }, null, 2);
 
 /** Returns an error message, or null when the text is a JSON object. Objects only: null, arrays and scalars are rejected. */
@@ -64,8 +65,22 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
   const schema = useMemo(() => validateSchemaText(schemaText), [schemaText]);
   // Destructive is a governed escalation: required whenever the saved risk is not already destructive.
   const needsConfirm = risk === "destructive" && tool?.risk !== "destructive";
-  const argsValid = args.every((a) => a.name.trim() !== "");
-  const identityValid = editing || (backendId.trim() !== "" && toolName.trim() !== "");
+  const backendIdError =
+    editing || IDENT_RE.test(backendId) ? null : "Backend ID may only contain letters, digits, '_', '.', '-' (1-128 characters).";
+  const toolNameError =
+    editing || IDENT_RE.test(toolName) ? null : "Tool name may only contain letters, digits, '_', '.', '-' (1-128 characters).";
+  const argError = useMemo(() => {
+    const seen = new Set<string>();
+    for (const a of args) {
+      const n = a.name.trim();
+      if (n === "") return "Argument names must not be empty.";
+      if (seen.has(n)) return `Duplicate argument name: ${n}`;
+      seen.add(n);
+    }
+    return null;
+  }, [args]);
+  const argsValid = argError === null;
+  const identityValid = backendIdError === null && toolNameError === null;
   const canSave =
     !saving && schema.error === null && argsValid && identityValid && (!needsConfirm || confirmed);
 
@@ -77,7 +92,7 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
     setSaving(true);
     setServerError(null);
     try {
-      await client.upsertTool(backendId.trim(), toolName.trim(), {
+      await client.upsertTool(backendId, toolName, {
         risk,
         schema: schema.value,
         arguments: args.map((a) => ({ ...a, name: a.name.trim() })),
@@ -127,8 +142,10 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
               value={backendId}
               readOnly={editing}
               onChange={(e) => setBackendId(e.target.value)}
+              aria-invalid={backendIdError !== null && backendId !== ""}
             />
           </label>
+          {backendIdError && backendId !== "" && <div style={errorStyle}>{backendIdError}</div>}
           <label style={fieldStyle}>
             Tool name
             <input
@@ -136,11 +153,16 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
               value={toolName}
               readOnly={editing}
               onChange={(e) => setToolName(e.target.value)}
+              aria-invalid={toolNameError !== null && toolName !== ""}
             />
           </label>
+          {toolNameError && toolName !== "" && <div style={errorStyle}>{toolNameError}</div>}
           <label style={fieldStyle}>
             Risk
-            <select className="ag-input" value={risk} onChange={(e) => setRisk(e.target.value)}>
+            <select className="ag-input" value={risk} onChange={(e) => {
+                setRisk(e.target.value);
+                setConfirmed(false);
+              }}>
               {RISKS.map((r) => (
                 <option key={r} value={r}>
                   {r}
@@ -166,9 +188,14 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
               value={schemaText}
               onChange={(e) => setSchemaText(e.target.value)}
               aria-invalid={schema.error !== null}
+              aria-describedby={schema.error ? "tool-schema-error" : undefined}
             />
           </label>
-          {schema.error && <div style={{ color: "var(--ag-deny, #b42318)", fontSize: 12.5 }}>{schema.error}</div>}
+          {schema.error && (
+            <div id="tool-schema-error" style={errorStyle}>
+              {schema.error}
+            </div>
+          )}
 
           <fieldset style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
             <legend style={{ fontSize: 12.5, padding: 0, marginBottom: 4 }}>Arguments</legend>
@@ -212,6 +239,7 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
                 </button>
               </div>
             ))}
+            {argError && <div style={errorStyle}>{argError}</div>}
             <div>
               <button
                 type="button"
@@ -238,3 +266,4 @@ export function ToolEditDialog({ client, tool, onClose, onSaved }: Props) {
 }
 
 const fieldStyle = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 } as const;
+const errorStyle = { color: "var(--ag-deny, #b42318)", fontSize: 12.5 } as const;

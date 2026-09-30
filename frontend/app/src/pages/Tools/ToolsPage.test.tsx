@@ -215,4 +215,65 @@ describe('ToolsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete tool' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('tool not found');
   });
+
+  async function openRegister() {
+    await screen.findByText('get_customer');
+    fireEvent.click(screen.getByRole('button', { name: 'Register tool' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Backend ID'), { target: { value: 'hr' } });
+    fireEvent.change(within(dialog).getByLabelText('Tool name'), { target: { value: 'get_employee' } });
+    return dialog;
+  }
+
+  it.each([['space', 'bad name'], ['slash', 'a/b'], ['129 chars', 'a'.repeat(129)]])(
+    'disables Save for an invalid tool name (%s)',
+    async (_l, value) => {
+      setup();
+      const dialog = await openRegister();
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+      fireEvent.change(within(dialog).getByLabelText('Tool name'), { target: { value } });
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+      expect(within(dialog).getByText(/tool name may only contain/i)).toBeInTheDocument();
+    }
+  );
+
+  it('disables Save for an invalid backend id', async () => {
+    setup();
+    const dialog = await openRegister();
+    fireEvent.change(within(dialog).getByLabelText('Backend ID'), { target: { value: 'my backend' } });
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(within(dialog).getByText(/backend id may only contain/i)).toBeInTheDocument();
+  });
+
+  it('disables Save for empty and duplicate argument names, including trailing-space variants', async () => {
+    setup();
+    const dialog = await openRegister();
+    const save = within(dialog).getByRole('button', { name: 'Save' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add argument' }));
+    expect(save).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText('Argument 1 name'), { target: { value: 'id' } });
+    expect(save).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add argument' }));
+    fireEvent.change(within(dialog).getByLabelText('Argument 2 name'), { target: { value: 'id ' } });
+    expect(save).toBeDisabled();
+    expect(within(dialog).getByText(/duplicate argument name/i)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Argument 2 name'), { target: { value: 'other' } });
+    expect(save).toBeEnabled();
+  });
+
+  it('resets the destructive confirmation when risk moves away and when reopened', async () => {
+    setup();
+    let dialog = await openEdit('get_customer');
+    fireEvent.change(within(dialog).getByLabelText('Risk'), { target: { value: 'destructive' } });
+    const label = 'I understand this changes authorization for all agents';
+    fireEvent.click(within(dialog).getByLabelText(label));
+    fireEvent.change(within(dialog).getByLabelText('Risk'), { target: { value: 'write' } });
+    fireEvent.change(within(dialog).getByLabelText('Risk'), { target: { value: 'destructive' } });
+    expect(within(dialog).getByLabelText(label)).not.toBeChecked();
+    fireEvent.click(within(dialog).getByLabelText(label));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    dialog = await openEdit('get_customer');
+    fireEvent.change(within(dialog).getByLabelText('Risk'), { target: { value: 'destructive' } });
+    expect(within(dialog).getByLabelText(label)).not.toBeChecked();
+  });
 });
