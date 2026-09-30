@@ -48,3 +48,23 @@ func TestLoadRequireDownstreamCredentialInvalid(t *testing.T) {
 		t.Fatalf("cfg=%v err=%v", cfg.RequireDownstreamCredential, err)
 	}
 }
+
+func TestLoadNormalizesEnvironment(t *testing.T) {
+	for in, want := range map[string]string{
+		"Production":   "production",
+		" PRODUCTION ": "production",
+		"prod":         "production",
+		"Staging":      "staging",
+		"":             defaultEnvironment,
+		"   ":          defaultEnvironment,
+	} {
+		t.Setenv(envPrefix+"ENV", in)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Environment != want {
+			t.Errorf("ENV %q => %q, want %q", in, cfg.Environment, want)
+		}
+	}
+}

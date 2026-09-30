@@ -167,3 +167,25 @@ func TestCheck_MissingAudienceMappingDenies(t *testing.T) {
 		t.Fatalf("want deny, got %v", resp)
 	}
 }
+
+func TestCheck_EmptyCredentialHeaderNameDenies(t *testing.T) {
+	srv := NewServerWithOptions(setupTestAdapter(t),
+		&fakeCredEvaluator{cred: &credential.Credential{HeaderName: "", HeaderValue: "Bearer x", Ref: "r"}},
+		ServerOptions{})
+	resp, err := srv.Check(context.Background(), credCheckReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetOkResponse() != nil || resp.GetDeniedResponse() == nil {
+		t.Fatalf("want deny, got %v", resp)
+	}
+	var reason string
+	for _, h := range resp.GetDeniedResponse().Headers {
+		if h.Header.Key == "x-agentgate-reason" {
+			reason = h.Header.Value
+		}
+	}
+	if reason != string(decision.ReasonCredentialIssuanceFailure) {
+		t.Errorf("reason = %q", reason)
+	}
+}

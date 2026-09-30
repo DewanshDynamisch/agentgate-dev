@@ -110,6 +110,9 @@ func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.C
 	}
 
 	if res.Decision == decision.Allow {
+		if cred != nil && cred.HeaderName == "" {
+			return s.buildDeniedResponse(decision.ReasonCredentialIssuanceFailure, "downstream credential malformed", res.ExecutionID), nil
+		}
 		if cred == nil && s.requireCredential {
 			return s.buildDeniedResponse(decision.ReasonCredentialIssuanceFailure, "downstream credential unavailable", res.ExecutionID), nil
 		}

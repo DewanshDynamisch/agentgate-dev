@@ -76,7 +76,7 @@ type Config struct {
 func Load() (Config, error) {
 	var cfg Config
 
-	cfg.Environment = getEnv(envPrefix+"ENV", defaultEnvironment)
+	cfg.Environment = normalizeEnvironment(getEnv(envPrefix+"ENV", defaultEnvironment))
 	cfg.HTTPAddr = getEnv(envPrefix+"HTTP_ADDR", defaultHTTPAddr)
 
 	grpcAddr := getEnv(envPrefix+"AUTHZ_GRPC_ADDR", "")
@@ -156,6 +156,17 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: %sADMIN_TOKEN must not be empty", envPrefix)
 	}
 	return nil
+}
+
+func normalizeEnvironment(s string) string {
+	env := strings.ToLower(strings.TrimSpace(s))
+	switch env {
+	case "":
+		return defaultEnvironment
+	case "prod":
+		return "production"
+	}
+	return env
 }
 
 func parseAudiences(s string) (map[string]string, error) {
