@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   HttpGovernanceClient,
+  staticToken,
   MockGovernanceClient,
   type GovernanceClient,
 } from "@contract/api/governanceClient";
@@ -55,7 +56,7 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
   const adminToken = import.meta.env.VITE_ADMIN_TOKEN || "";
   const useMock = import.meta.env.VITE_USE_MOCK === "true" || !adminToken;
   const client: GovernanceClient = useMemo(
-    () => (useMock ? new MockGovernanceClient() : new HttpGovernanceClient(apiUrl, adminToken)),
+    () => (useMock ? new MockGovernanceClient() : new HttpGovernanceClient(apiUrl, staticToken(adminToken))),
     [adminToken, apiUrl, useMock]
   );
   const storeRef = useRef<PolicyLifecycleStore>(new PolicyLifecycleStore(client, WORKSPACE_ID));

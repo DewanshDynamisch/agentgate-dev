@@ -61,6 +61,10 @@ export function clientWithWorkflow(overrides: Partial<GovernanceClient> = {}): G
     },
     previewPolicy: async (): Promise<{ version: string; results: never[] }> => ({ version: 'candidate-v2', results: [] }),
     dryRunCompare: async (): Promise<DryRunCompareResponse> => ({ candidate_version: 'candidate-v2', results: [] }),
+    listAuditEvents: async (workspaceId: string) => ({ workspaceId, events: [] }),
+    listTools: async () => [],
+    upsertTool: async () => { throw new Error('upsertTool not stubbed'); },
+    deleteTool: async () => undefined,
     ...overrides,
   };
 }

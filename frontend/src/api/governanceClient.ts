@@ -11,6 +11,22 @@ import {
   RollbackResponse,
   ValidateResponse,
 } from "../models/governance.js";
+import type { AuditEvent, AuditEventsPage, ListAuditEventsOptions } from "../models/audit.js";
+import type { ToolDefinition, ToolUpsert } from "../models/tools.js";
+import { apiErrorMessage, type ApiError } from "../models/api-error.js";
+import { parseAuditEventsPage } from "../parsing/parse-audit-events.js";
+import { parseToolDefinition, parseToolDefinitions } from "../parsing/parse-tools.js";
+
+export type AccessTokenProvider = () => Promise<string>;
+
+/** Wraps a fixed token; intended for tests and local tooling. */
+export function staticToken(token: string): AccessTokenProvider {
+  return async () => token;
+}
+
+function invalidResponse(error: ApiError): GovernanceApiError {
+  return new GovernanceApiError(502, "INVALID_RESPONSE", apiErrorMessage(error));
+}
 
 export interface GovernanceClient {
   listPolicies(workspaceId: string): Promise<PolicyRecord[]>;
@@ -20,6 +36,10 @@ export interface GovernanceClient {
   rollbackPolicy(workspaceId: string, targetVersion: string): Promise<RollbackResponse>;
   previewPolicy(workspaceId: string, version: string, sampleRequests: PreviewSample[]): Promise<PreviewResponse>;
   dryRunCompare(workspaceId: string, version: string, sampleRequests: (PreviewSample | DryRunSample)[]): Promise<DryRunCompareResponse>;
+  listAuditEvents(workspaceId: string, opts?: ListAuditEventsOptions): Promise<AuditEventsPage>;
+  listTools(): Promise<ToolDefinition[]>;
+  upsertTool(backendId: string, toolName: string, body: ToolUpsert): Promise<ToolDefinition>;
+  deleteTool(backendId: string, toolName: string): Promise<void>;
 }
 
 // Simple hash simulation for MockGovernanceClient
@@ -35,6 +55,53 @@ function mockHash(content: string): string {
 
 export class MockGovernanceClient implements GovernanceClient {
   private data: Map<string, Map<string, PolicyRecord>> = new Map();
+  private auditEvents: Map<string, AuditEvent[]> = new Map();
+  private tools: Map<string, ToolDefinition> = new Map();
+
+  /** Test helper: seeds in-memory audit events for a workspace. */
+  seedAuditEvents(workspaceId: string, events: AuditEvent[]): void {
+    this.auditEvents.set(workspaceId, [...events]);
+  }
+
+  async listAuditEvents(workspaceId: string, opts: ListAuditEventsOptions = {}): Promise<AuditEventsPage> {
+    const all = [...(this.auditEvents.get(workspaceId) ?? [])].sort((a, b) => b.sequenceNumber - a.sequenceNumber);
+    const before = opts.beforeSequence;
+    const filtered = before === undefined ? all : all.filter((e) => e.sequenceNumber < before);
+    const limit = opts.limit ?? 50;
+    const events = filtered.slice(0, limit);
+    const page: AuditEventsPage = { workspaceId, events };
+    if (filtered.length > limit && events.length > 0) {
+      page.nextBeforeSequence = events[events.length - 1]!.sequenceNumber;
+    }
+    return page;
+  }
+
+  async listTools(): Promise<ToolDefinition[]> {
+    return Array.from(this.tools.values()).sort((a, b) =>
+      `${a.backendId}/${a.toolName}`.localeCompare(`${b.backendId}/${b.toolName}`)
+    );
+  }
+
+  async upsertTool(backendId: string, toolName: string, body: ToolUpsert): Promise<ToolDefinition> {
+    const def: ToolDefinition = {
+      backendId,
+      toolName,
+      risk: body.risk,
+      schema: body.schema,
+      arguments: body.arguments.map((a) => ({ ...a })),
+      description: body.description,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+    };
+    this.tools.set(`${backendId}/${toolName}`, def);
+    return def;
+  }
+
+  async deleteTool(backendId: string, toolName: string): Promise<void> {
+    if (!this.tools.delete(`${backendId}/${toolName}`)) {
+      throw new GovernanceApiError(404, "NOT_FOUND", "tool not found");
+    }
+  }
 
   private getWorkspaceMap(ws: string): Map<string, PolicyRecord> {
     if (!this.data.has(ws)) {
@@ -187,23 +254,24 @@ export type FetchFunction = (url: string, options?: FetchRequestOptions) => Prom
 
 export class HttpGovernanceClient implements GovernanceClient {
   private baseUrl: string;
-  private adminToken: string;
+  private getAccessToken: AccessTokenProvider;
   private fetchFn: FetchFunction;
 
   constructor(
     baseUrl: string,
-    adminToken: string,
+    getAccessToken: AccessTokenProvider,
     fetchFn: FetchFunction = (url, options) =>
       (globalThis as unknown as { fetch: FetchFunction }).fetch(url, options)
   ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.adminToken = adminToken;
+    this.getAccessToken = getAccessToken;
     this.fetchFn = fetchFn;
   }
 
   private async request<T>(path: string, options: FetchRequestOptions = {}): Promise<T> {
+    const token = await this.getAccessToken();
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.adminToken}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(options.headers || {}),
     };
@@ -228,7 +296,52 @@ export class HttpGovernanceClient implements GovernanceClient {
       throw new GovernanceApiError(resp.status, code, message);
     }
 
+    if (resp.status === 204) {
+      return undefined as T;
+    }
     return (await resp.json()) as T;
+  }
+
+  async listAuditEvents(workspaceId: string, opts: ListAuditEventsOptions = {}): Promise<AuditEventsPage> {
+    const q: string[] = [];
+    if (opts.limit !== undefined) q.push(`limit=${encodeURIComponent(String(opts.limit))}`);
+    if (opts.beforeSequence !== undefined) q.push(`before_sequence=${encodeURIComponent(String(opts.beforeSequence))}`);
+    const qs = q.length ? `?${q.join("&")}` : "";
+    const raw = await this.request<unknown>(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/audit-events${qs}`);
+    const parsed = parseAuditEventsPage(raw);
+    if (!parsed.ok) throw invalidResponse(parsed.error);
+    return parsed.value;
+  }
+
+  async listTools(): Promise<ToolDefinition[]> {
+    const parsed = parseToolDefinitions(await this.request<unknown>("/api/v1/tools"));
+    if (!parsed.ok) throw invalidResponse(parsed.error);
+    return parsed.value;
+  }
+
+  async upsertTool(backendId: string, toolName: string, body: ToolUpsert): Promise<ToolDefinition> {
+    const raw = await this.request<unknown>(
+      `/api/v1/tools/${encodeURIComponent(backendId)}/${encodeURIComponent(toolName)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          risk: body.risk,
+          schema: body.schema,
+          arguments: body.arguments,
+          description: body.description,
+        }),
+      }
+    );
+    const parsed = parseToolDefinition(raw);
+    if (!parsed.ok) throw invalidResponse(parsed.error);
+    return parsed.value;
+  }
+
+  async deleteTool(backendId: string, toolName: string): Promise<void> {
+    await this.request<void>(
+      `/api/v1/tools/${encodeURIComponent(backendId)}/${encodeURIComponent(toolName)}`,
+      { method: "DELETE" }
+    );
   }
 
   async listPolicies(workspaceId: string): Promise<PolicyRecord[]> {
