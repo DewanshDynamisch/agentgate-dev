@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -17,11 +18,24 @@ type DecisionEvaluator interface {
 	Evaluate(ctx context.Context, req decision.Request) (decision.Result, error)
 }
 
+// CredentialedEvaluator is implemented by evaluators that also mint a downstream credential.
+type CredentialedEvaluator interface {
+	EvaluateWithCredential(ctx context.Context, req decision.Request) (decision.Result, *credential.Credential, error)
+}
+
+// ServerOptions configures optional Server behaviour.
+type ServerOptions struct {
+	// RequireDownstreamCredential denies Allow decisions that carry no minted credential.
+	RequireDownstreamCredential bool
+}
+
 // Server implements Envoy's v3 ext_authz AuthorizationServer interface.
 type Server struct {
 	authv3.UnimplementedAuthorizationServer
 	adapter     *Adapter
 	decisionSvc DecisionEvaluator
+
+	requireCredential bool
 }
 
 // NewServer constructs an ext_authz gRPC Server.
@@ -29,6 +43,15 @@ func NewServer(adapter *Adapter, decisionSvc DecisionEvaluator) *Server {
 	return &Server{
 		adapter:     adapter,
 		decisionSvc: decisionSvc,
+	}
+}
+
+// NewServerWithOptions constructs an ext_authz gRPC Server with explicit options.
+func NewServerWithOptions(adapter *Adapter, decisionSvc DecisionEvaluator, opts ServerOptions) *Server {
+	return &Server{
+		adapter:           adapter,
+		decisionSvc:       decisionSvc,
+		requireCredential: opts.RequireDownstreamCredential,
 	}
 }
 
@@ -72,19 +95,31 @@ func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.C
 		return s.buildDeniedResponse(decision.ReasonEvaluationError, "decision service not configured", decisionReq.ExecutionID), nil
 	}
 
-	res, err := s.decisionSvc.Evaluate(ctx, decisionReq)
+	var (
+		res  decision.Result
+		cred *credential.Credential
+		err  error
+	)
+	if ce, ok := s.decisionSvc.(CredentialedEvaluator); ok {
+		res, cred, err = ce.EvaluateWithCredential(ctx, decisionReq)
+	} else {
+		res, err = s.decisionSvc.Evaluate(ctx, decisionReq)
+	}
 	if err != nil {
 		return s.buildDeniedResponse(decision.ReasonEvaluationError, err.Error(), decisionReq.ExecutionID), nil
 	}
 
 	if res.Decision == decision.Allow {
-		return s.buildOkResponse(res), nil
+		if cred == nil && s.requireCredential {
+			return s.buildDeniedResponse(decision.ReasonCredentialIssuanceFailure, "downstream credential unavailable", res.ExecutionID), nil
+		}
+		return s.buildOkResponse(res, cred), nil
 	}
 
 	return s.buildDeniedResponse(res.Reason, res.Message, res.ExecutionID), nil
 }
 
-func (s *Server) buildOkResponse(res decision.Result) *authv3.CheckResponse {
+func (s *Server) buildOkResponse(res decision.Result, cred *credential.Credential) *authv3.CheckResponse {
 	headers := []*corev3.HeaderValueOption{
 		{
 			Header: &corev3.HeaderValue{
@@ -115,6 +150,16 @@ func (s *Server) buildOkResponse(res decision.Result) *authv3.CheckResponse {
 		})
 	}
 
+	var toRemove []string
+	if cred != nil {
+		headers = append(headers, &corev3.HeaderValueOption{
+			Header:       &corev3.HeaderValue{Key: cred.HeaderName, Value: cred.HeaderValue},
+			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+		})
+	} else {
+		toRemove = []string{"authorization"}
+	}
+
 	return &authv3.CheckResponse{
 		Status: &status.Status{
 			Code:    int32(codes.OK),
@@ -122,7 +167,8 @@ func (s *Server) buildOkResponse(res decision.Result) *authv3.CheckResponse {
 		},
 		HttpResponse: &authv3.CheckResponse_OkResponse{
 			OkResponse: &authv3.OkHttpResponse{
-				Headers: headers,
+				Headers:         headers,
+				HeadersToRemove: toRemove,
 			},
 		},
 	}

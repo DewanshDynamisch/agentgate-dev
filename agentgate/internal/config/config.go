@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,6 +58,15 @@ type Config struct {
 	// DatabaseURL is the PostgreSQL connection string for persistent policy storage.
 	// If empty, AgentGate runs with an in-memory policy store.
 	DatabaseURL string
+
+	// CredentialSigningKeyFile is the PEM RSA private key used to sign downstream credentials.
+	CredentialSigningKeyFile string
+	CredentialIssuer         string
+	CredentialKeyID          string
+	CredentialLifetime       time.Duration
+	// CredentialAudiences maps backendID to the audience of credentials minted for it.
+	CredentialAudiences         map[string]string
+	RequireDownstreamCredential bool
 }
 
 // Load reads configuration from the process environment, applies defaults
@@ -99,6 +109,30 @@ func Load() (Config, error) {
 	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", defaultAdminToken)
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
 
+	cfg.CredentialSigningKeyFile = getEnv(envPrefix+"CREDENTIAL_SIGNING_KEY_FILE", "")
+	cfg.CredentialIssuer = getEnv(envPrefix+"CREDENTIAL_ISSUER", "agentgate")
+	cfg.CredentialKeyID = getEnv(envPrefix+"CREDENTIAL_KEY_ID", "agentgate-cred-1")
+
+	lifetimeStr := getEnv(envPrefix+"CREDENTIAL_LIFETIME", (60 * time.Second).String())
+	lifetime, err := time.ParseDuration(lifetimeStr)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: invalid %sCREDENTIAL_LIFETIME %q: %w", envPrefix, lifetimeStr, err)
+	}
+	cfg.CredentialLifetime = lifetime
+
+	audiences, err := parseAudiences(getEnv(envPrefix+"CREDENTIAL_AUDIENCES", ""))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
+	cfg.CredentialAudiences = audiences
+
+	requireStr := getEnv(envPrefix+"REQUIRE_DOWNSTREAM_CREDENTIAL", "true")
+	require, err := strconv.ParseBool(requireStr)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: invalid %sREQUIRE_DOWNSTREAM_CREDENTIAL %q: %w", envPrefix, requireStr, err)
+	}
+	cfg.RequireDownstreamCredential = require
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -122,6 +156,22 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: %sADMIN_TOKEN must not be empty", envPrefix)
 	}
 	return nil
+}
+
+func parseAudiences(s string) (map[string]string, error) {
+	out := map[string]string{}
+	if strings.TrimSpace(s) == "" {
+		return out, nil
+	}
+	for _, entry := range strings.Split(s, ",") {
+		backend, aud, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		backend, aud = strings.TrimSpace(backend), strings.TrimSpace(aud)
+		if !ok || backend == "" || aud == "" {
+			return nil, fmt.Errorf("invalid %sCREDENTIAL_AUDIENCES entry %q (want backendID=audience)", envPrefix, entry)
+		}
+		out[backend] = aud
+	}
+	return out, nil
 }
 
 func parseLogLevel(s string) (slog.Level, error) {

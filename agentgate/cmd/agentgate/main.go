@@ -6,8 +6,10 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -18,6 +20,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
 	"github.com/Dynamisch-LLC/agentgate/internal/authz"
 	"github.com/Dynamisch-LLC/agentgate/internal/config"
+	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/fixturepolicy"
 	"github.com/Dynamisch-LLC/agentgate/internal/govapi"
 	"github.com/Dynamisch-LLC/agentgate/internal/governanceintegration"
@@ -252,7 +255,27 @@ func run() error {
 		},
 	})
 
-	authzServer := authz.NewServer(authzAdapter, auditedDecisionSvc)
+	signingKey, err := loadSigningKey(cfg, logger)
+	if err != nil {
+		return err
+	}
+	audiences := cfg.CredentialAudiences
+	issuer, err := credential.NewJWTIssuer(credential.JWTIssuerConfig{
+		Issuer:      cfg.CredentialIssuer,
+		KeyID:       cfg.CredentialKeyID,
+		PrivateKey:  signingKey,
+		Lifetime:    cfg.CredentialLifetime,
+		AudienceFor: func(backendID string) string { return audiences[backendID] },
+	})
+	if err != nil {
+		return fmt.Errorf("init credential issuer: %w", err)
+	}
+	auditedDecisionSvc.SetIssuer(issuer)
+	srv.Mux().Handle("GET /.well-known/jwks.json", credential.JWKSHandler(issuer.JWKS()))
+
+	authzServer := authz.NewServerWithOptions(authzAdapter, auditedDecisionSvc, authz.ServerOptions{
+		RequireDownstreamCredential: cfg.RequireDownstreamCredential,
+	})
 
 	// Start ext_authz gRPC Server
 	grpcListener, err := net.Listen("tcp", cfg.AuthzGRPCAddr)
@@ -294,4 +317,23 @@ func run() error {
 
 	logger.Info("agentgate stopped cleanly")
 	return nil
+}
+
+func loadSigningKey(cfg config.Config, logger *slog.Logger) (*rsa.PrivateKey, error) {
+	if cfg.CredentialSigningKeyFile != "" {
+		key, err := credential.LoadRSAPrivateKeyPEM(cfg.CredentialSigningKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load credential signing key: %w", err)
+		}
+		return key, nil
+	}
+	if cfg.Environment == "production" {
+		return nil, errors.New("AGENTGATE_CREDENTIAL_SIGNING_KEY_FILE is required when AGENTGATE_ENV=production")
+	}
+	logger.Warn("no credential signing key file configured; using ephemeral key (tokens invalid after restart)")
+	key, err := credential.GenerateEphemeralKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate ephemeral credential key: %w", err)
+	}
+	return key, nil
 }
