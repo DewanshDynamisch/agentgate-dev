@@ -4,6 +4,7 @@ import { RequireAuth } from "./components/auth/RequireAuth";
 import { AuthProvider } from "./state/AuthProvider";
 import { GovernanceProvider } from "./state/GovernanceProvider";
 import { ToastProvider } from "./state/ToastProvider";
+import { AuthCallbackPage } from "./pages/AuthCallback";
 import { LoginPage } from "./pages/Login/LoginPage";
 import { DashboardPage } from "./pages/Dashboard/DashboardPage";
 import { PoliciesListPage } from "./pages/Policies/PoliciesListPage";
@@ -23,6 +24,7 @@ export default function App() {
       <ToastProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
           <Route
             element={

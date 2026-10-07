@@ -48,7 +48,7 @@ export function TopNav() {
         <QuickSearch />
         <div className="ag-topbar-divider" />
         <button
-          onClick={logout}
+          onClick={() => void logout()}
           title="Sign out"
           className="ag-avatar"
           style={{ border: "none", cursor: "pointer", fontFamily: "inherit" }}

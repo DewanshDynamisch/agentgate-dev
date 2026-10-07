@@ -8,8 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  HttpGovernanceClient,
-  staticToken,
   MockGovernanceClient,
   type GovernanceClient,
 } from "@contract/api/governanceClient";
@@ -25,6 +23,13 @@ import type {
 } from "@contract/models/governance";
 import { seedDemoPolicies } from "./seedDemoData";
 import { selectClientMode } from "../lib/clientMode";
+import { getConfig } from "../auth/config";
+import { getAccessToken } from "../auth/oidc";
+import { createHttpGovernanceClient } from "../auth/governanceHttp";
+import { useAuth } from "./AuthProvider";
+
+const REAUTH_KEY = "agentgate.reauth-at";
+const REAUTH_MIN_INTERVAL_MS = 30_000;
 
 const WORKSPACE_ID = "default";
 
@@ -60,14 +65,28 @@ const GovernanceClientContext = createContext<GovernanceClientContextValue | nul
  * never call the store directly.
  */
 export function GovernanceProvider({ children }: { children: ReactNode }) {
-  const apiUrl = import.meta.env.VITE_API_URL || "";
-  const adminToken = import.meta.env.VITE_ADMIN_TOKEN || "";
+  const apiUrl = getConfig().apiUrl;
+  const { login } = useAuth();
+  const loginRef = useRef(login);
+  loginRef.current = login;
   // Mock only in tests or an explicit dev opt-in; production builds always use HTTP.
   const useMock = selectClientMode(import.meta.env) === "mock";
-  const client: GovernanceClient = useMemo(
-    () => (useMock ? new MockGovernanceClient() : new HttpGovernanceClient(apiUrl, staticToken(adminToken))),
-    [adminToken, apiUrl, useMock]
-  );
+  const client: GovernanceClient = useMemo(() => {
+    if (useMock) return new MockGovernanceClient();
+    // A 401 restarts SSO. Rate-limited so a token the API keeps rejecting
+    // (e.g. missing role) cannot cause an endless redirect loop.
+    const onUnauthorized = () => {
+      try {
+        const last = Number(sessionStorage.getItem(REAUTH_KEY) ?? "0");
+        if (Date.now() - last < REAUTH_MIN_INTERVAL_MS) return;
+        sessionStorage.setItem(REAUTH_KEY, String(Date.now()));
+      } catch {
+        // storage unavailable: still attempt login once per call
+      }
+      void loginRef.current().catch(() => undefined);
+    };
+    return createHttpGovernanceClient(apiUrl, getAccessToken, onUnauthorized);
+  }, [apiUrl, useMock]);
   const storeRef = useRef<PolicyLifecycleStore>(new PolicyLifecycleStore(client, WORKSPACE_ID));
   const [state, setState] = useState<PolicyLifecycleState>(storeRef.current.getState());
   const [ready, setReady] = useState(false);

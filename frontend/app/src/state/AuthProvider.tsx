@@ -1,61 +1,65 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  type ReactNode,
-} from "react";
-
-const SESSION_KEY = "agentgate.admin-token";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as oidc from "../auth/oidc";
+import type { AppUser } from "../auth/oidc";
 
 interface AuthContextValue {
-  isAuthenticated: boolean;
-  login: (token: string) => { ok: boolean; error?: string };
-  logout: () => void;
+  user: AppUser | null;
+  /** True until the stored session has been read. */
+  loading: boolean;
+  ssoConfigured: boolean;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  /** Completes the IdP redirect (callback route) and stores the user. */
+  completeLogin: () => Promise<AppUser>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/**
- * Minimal real gate matching how the backend actually authenticates today:
- * a single static admin bearer token (AGENTGATE_ADMIN_TOKEN), not per-user
- * login. There is no live backend connected yet, so there is nothing to
- * call — this checks the entered token against VITE_ADMIN_TOKEN when that
- * env var is set (matching what a real deployment would require), and
- * falls back to accepting any non-empty token for local/demo use when it
- * isn't set. Session state is a plain sessionStorage flag: it clears when
- * the tab closes, and is not a substitute for real server-side auth.
- */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => sessionStorage.getItem(SESSION_KEY) === "true"
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const callbackRef = useRef<Promise<AppUser> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    oidc
+      .getCurrentUser()
+      // Never overwrite a user already set by the callback exchange.
+      .then((u) => !cancelled && setUser((prev) => prev ?? u))
+      .catch(() => undefined)
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const completeLogin = useCallback(() => {
+    // The authorization code is single-use: share one in-flight exchange (StrictMode double effects).
+    if (!callbackRef.current) {
+      callbackRef.current = oidc.handleCallback().then((u) => {
+        setUser(u);
+        return u;
+      });
+    }
+    return callbackRef.current;
+  }, []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      loading,
+      ssoConfigured: oidc.isSsoConfigured(),
+      login: () => oidc.login(),
+      logout: async () => {
+        setUser(null);
+        await oidc.logout();
+      },
+      completeLogin,
+    }),
+    [user, loading, completeLogin]
   );
 
-  const login = (token: string): { ok: boolean; error?: string } => {
-    const trimmed = token.trim();
-    if (trimmed.length === 0) {
-      return { ok: false, error: "Enter the admin token." };
-    }
-
-    const expected = import.meta.env.VITE_ADMIN_TOKEN as string | undefined;
-    if (expected && trimmed !== expected) {
-      return { ok: false, error: "That token doesn't match." };
-    }
-
-    sessionStorage.setItem(SESSION_KEY, "true");
-    setIsAuthenticated(true);
-    return { ok: true };
-  };
-
-  const logout = () => {
-    sessionStorage.removeItem(SESSION_KEY);
-    setIsAuthenticated(false);
-  };
-
-  return (
-    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
