@@ -23,37 +23,46 @@ const (
 	maxJWKSKeys     = 64
 )
 
-// keySet caches the IdP's verification keys. The mutex is never held across a
-// network call.
+// keySet caches the IdP verification keys. The mutex is never held across a
+// network call. Keys older than maxAge are refetched on use; if that fails the
+// cache keeps serving until 2*maxAge, then fails closed with ErrUnavailable.
 type keySet struct {
 	jwksURL string
 	client  *http.Client
 	now     func() time.Time
+	maxAge  time.Duration
 
 	mu          sync.Mutex
 	keys        map[string]any // kid -> *rsa.PublicKey | *ecdsa.PublicKey
+	fetchedAt   time.Time      // last successful fetch
 	lastAttempt time.Time
 	lastErr     error
 }
 
-func newKeySet(jwksURL string, client *http.Client, now func() time.Time) *keySet {
-	return &keySet{jwksURL: jwksURL, client: client, now: now}
+func newKeySet(jwksURL string, client *http.Client, now func() time.Time, maxAge time.Duration) *keySet {
+	return &keySet{jwksURL: jwksURL, client: client, now: now, maxAge: maxAge}
 }
 
-// get returns the key for kid. An unknown kid triggers at most one JWKS
-// refetch per jwksRefreshMin. ErrUnavailable is returned when the key cannot
-// be had because the IdP could not be reached.
+// get returns the key for kid. An unknown or expired key triggers at most one
+// JWKS refetch per jwksRefreshMin. ErrUnavailable is returned when the key
+// cannot be had because the IdP could not be reached.
 func (ks *keySet) get(ctx context.Context, kid string) (any, error) {
 	ks.mu.Lock()
-	if k, ok := ks.keys[kid]; ok {
+	now := ks.now()
+	k, known := ks.keys[kid]
+	age := now.Sub(ks.fetchedAt)
+	if known && age <= ks.maxAge {
 		ks.mu.Unlock()
 		return k, nil
 	}
-	now := ks.now()
+	canServeStale := known && age <= 2*ks.maxAge
 	if !ks.lastAttempt.IsZero() && now.Sub(ks.lastAttempt) < jwksRefreshMin {
 		lastErr := ks.lastErr
 		ks.mu.Unlock()
-		if lastErr != nil {
+		switch {
+		case canServeStale:
+			return k, nil
+		case known || lastErr != nil:
 			return nil, ErrUnavailable
 		}
 		return nil, ErrInvalidToken
@@ -67,11 +76,15 @@ func (ks *keySet) get(ctx context.Context, kid string) (any, error) {
 	defer ks.mu.Unlock()
 	ks.lastErr = err
 	if err != nil {
+		if canServeStale {
+			return k, nil
+		}
 		return nil, ErrUnavailable
 	}
 	ks.keys = keys
-	if k, ok := keys[kid]; ok {
-		return k, nil
+	ks.fetchedAt = now
+	if nk, ok := keys[kid]; ok {
+		return nk, nil
 	}
 	return nil, ErrInvalidToken
 }
@@ -87,6 +100,7 @@ func (ks *keySet) refresh(ctx context.Context) error {
 		return err
 	}
 	ks.keys = keys
+	ks.fetchedAt = ks.lastAttempt
 	return nil
 }
 
@@ -117,8 +131,16 @@ func (ks *keySet) fetch(ctx context.Context) (map[string]any, error) {
 		return nil, errors.New("oidcverify: jwks has too many keys")
 	}
 	out := make(map[string]any, len(doc.Keys))
+	seen := make(map[string]struct{}, len(doc.Keys))
 	for _, j := range doc.Keys {
-		if j.Kid == "" || (j.Use != "" && j.Use != "sig") {
+		if j.Kid == "" {
+			continue
+		}
+		if _, dup := seen[j.Kid]; dup {
+			return nil, errors.New("oidcverify: jwks has duplicate kid")
+		}
+		seen[j.Kid] = struct{}{}
+		if j.Use != "" && j.Use != "sig" {
 			continue
 		}
 		if k := j.publicKey(); k != nil {
@@ -190,6 +212,10 @@ func discoverJWKSURL(ctx context.Context, client *http.Client, issuer string) (s
 }
 
 func getBounded(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	// Detach from the caller cancellation so one cancelled request cannot
+	// fail (and poison the throttle state of) a shared refresh.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), httpTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

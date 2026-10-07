@@ -68,6 +68,8 @@ type idp struct {
 	keys     []testKey
 	jwksHits atomic.Int32
 	discHits atomic.Int32
+	extra    []map[string]string
+	discIss  string
 }
 
 func newIDP(t *testing.T, keys ...testKey) *idp {
@@ -76,7 +78,11 @@ func newIDP(t *testing.T, keys ...testKey) *idp {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		p.discHits.Add(1)
-		doc := map[string]string{"issuer": p.srv.URL, "jwks_uri": p.srv.URL + "/jwks"}
+		iss := p.srv.URL
+		if p.discIss != "" {
+			iss = p.discIss
+		}
+		doc := map[string]string{"issuer": iss, "jwks_uri": p.srv.URL + "/jwks"}
 		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +93,7 @@ func newIDP(t *testing.T, keys ...testKey) *idp {
 		for _, k := range p.keys {
 			ks = append(ks, k.jwk())
 		}
+		ks = append(ks, p.extra...)
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": ks})
 	})
 	p.srv = httptest.NewServer(mux)
@@ -154,7 +161,7 @@ func baseClaims(p *idp, c *clock) map[string]any {
 
 func newVerifier(t *testing.T, p *idp, c *clock, mod func(*Config)) *Verifier {
 	t.Helper()
-	cfg := Config{IssuerURL: p.srv.URL, Audience: "agentgate-admin", Now: c.now}
+	cfg := Config{IssuerURL: p.srv.URL, Audience: "agentgate-admin", Now: c.now, AllowInsecureHTTP: true}
 	if mod != nil {
 		mod(&cfg)
 	}
@@ -386,10 +393,10 @@ func TestNewFailsWhenIdPUnreachable(t *testing.T) {
 	p := newIDP(t, newRSAKey(t, "r1"))
 	url := p.srv.URL
 	p.srv.Close()
-	if _, err := New(context.Background(), Config{IssuerURL: url, Audience: "a"}); err == nil {
+	if _, err := New(context.Background(), Config{IssuerURL: url, Audience: "a", AllowInsecureHTTP: true}); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := New(context.Background(), Config{IssuerURL: url, Audience: "a", JWKSURL: url + "/jwks"}); err == nil {
+	if _, err := New(context.Background(), Config{IssuerURL: url, Audience: "a", JWKSURL: url + "/jwks", AllowInsecureHTTP: true}); err == nil {
 		t.Fatal("expected error with explicit JWKS URL")
 	}
 }
@@ -410,7 +417,7 @@ func TestOversizedJWKSRejected(t *testing.T) {
 		_, _ = w.Write([]byte(`"}`))
 	}))
 	defer srv.Close()
-	if _, err := New(context.Background(), Config{IssuerURL: "https://x", Audience: "a", JWKSURL: srv.URL}); err == nil {
+	if _, err := New(context.Background(), Config{IssuerURL: "https://x", Audience: "a", JWKSURL: srv.URL, AllowInsecureHTTP: true}); err == nil {
 		t.Fatal("oversized JWKS accepted")
 	}
 }

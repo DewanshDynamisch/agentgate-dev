@@ -14,6 +14,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -33,9 +34,10 @@ var b64 = base64.RawURLEncoding.Strict()
 func ellipticP256() elliptic.Curve { return elliptic.P256() }
 
 const (
-	defaultRolePath  = "realm_access.roles"
-	defaultClockSkew = 30 * time.Second
-	maxTokenBytes    = 16 << 10
+	defaultRolePath   = "realm_access.roles"
+	defaultClockSkew  = 30 * time.Second
+	defaultJWKSMaxAge = time.Hour
+	maxTokenBytes     = 16 << 10
 )
 
 // Config configures a Verifier.
@@ -50,6 +52,12 @@ type Config struct {
 	HTTPClient    *http.Client
 	Now           func() time.Time
 	ClockSkew     time.Duration // default 30s
+	// JWKSMaxAge is how long cached keys are trusted before a refetch is
+	// attempted; default 1h. If refetching fails, keys keep being served until
+	// 2*JWKSMaxAge, after which verification fails closed (ErrUnavailable).
+	JWKSMaxAge time.Duration
+	// AllowInsecureHTTP permits http:// issuer/JWKS URLs. Tests only.
+	AllowInsecureHTTP bool
 }
 
 // Principal is the verified identity extracted from a token.
@@ -76,13 +84,32 @@ func New(ctx context.Context, cfg Config) (*Verifier, error) {
 	if cfg.Audience == "" {
 		return nil, errors.New("oidcverify: Audience is required")
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: httpTimeout}
-	} else if client.Timeout == 0 {
-		c := *client
-		c.Timeout = httpTimeout
-		client = &c
+	if err := requireHTTPS(cfg.IssuerURL, cfg.AllowInsecureHTTP); err != nil {
+		return nil, err
+	}
+	if cfg.JWKSURL != "" {
+		if err := requireHTTPS(cfg.JWKSURL, cfg.AllowInsecureHTTP); err != nil {
+			return nil, err
+		}
+	}
+	c := http.Client{Timeout: httpTimeout}
+	if cfg.HTTPClient != nil {
+		c = *cfg.HTTPClient
+		if c.Timeout == 0 {
+			c.Timeout = httpTimeout
+		}
+	}
+	// Never follow a redirect to another host or scheme.
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 || req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme {
+			return errors.New("oidcverify: redirect refused")
+		}
+		return nil
+	}
+	client := &c
+	maxAge := cfg.JWKSMaxAge
+	if maxAge <= 0 {
+		maxAge = defaultJWKSMaxAge
 	}
 	now := cfg.Now
 	if now == nil {
@@ -102,9 +129,12 @@ func New(ctx context.Context, cfg Config) (*Verifier, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireHTTPS(u, cfg.AllowInsecureHTTP); err != nil {
+			return nil, err
+		}
 		jwksURL = u
 	}
-	ks := newKeySet(jwksURL, client, now)
+	ks := newKeySet(jwksURL, client, now, maxAge)
 	if err := ks.refresh(ctx); err != nil {
 		return nil, err
 	}
@@ -133,12 +163,18 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (Principal, erro
 	var hdr struct {
 		Alg string `json:"alg"`
 		Kid string `json:"kid"`
+		Typ string `json:"typ"`
 	}
 	if json.Unmarshal(hdrB, &hdr) != nil {
 		return Principal{}, ErrInvalidToken
 	}
 	// Algorithm allow-list is enforced before any key is looked up or used.
 	if (hdr.Alg != "RS256" && hdr.Alg != "ES256") || hdr.Kid == "" {
+		return Principal{}, ErrInvalidToken
+	}
+	switch strings.ToLower(hdr.Typ) {
+	case "", "jwt", "at+jwt":
+	default:
 		return Principal{}, ErrInvalidToken
 	}
 	key, err := v.keys.get(ctx, hdr.Kid)
@@ -173,6 +209,14 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (Principal, erro
 	}
 	if iss, _ := claims["iss"].(string); iss != v.issuer {
 		return Principal{}, ErrInvalidToken
+	}
+	// Access tokens only: Keycloak ID/refresh/offline/logout tokens carry a
+	// payload typ other than Bearer and must not be usable as credentials.
+	if typ, present := claims["typ"]; present {
+		ts, ok := typ.(string)
+		if !ok || !strings.EqualFold(ts, "Bearer") {
+			return Principal{}, ErrInvalidToken
+		}
 	}
 	if !v.audienceOK(claims) {
 		return Principal{}, ErrInvalidToken
@@ -249,4 +293,15 @@ func (v *Verifier) roles(claims map[string]any) []string {
 		}
 	}
 	return out
+}
+
+func requireHTTPS(raw string, allowHTTP bool) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return errors.New("oidcverify: invalid URL")
+	}
+	if u.Scheme == "https" || (allowHTTP && u.Scheme == "http") {
+		return nil
+	}
+	return errors.New("oidcverify: https is required")
 }
