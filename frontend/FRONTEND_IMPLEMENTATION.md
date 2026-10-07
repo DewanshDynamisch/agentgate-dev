@@ -60,7 +60,7 @@ There is no separate `admin-ui/` directory in this checkout. `frontend/app` is t
 
 ## 3. Backend Connection
 
-When `VITE_ADMIN_TOKEN` is set, the React app uses `HttpGovernanceClient`.
+Outside tests and an explicit dev mock opt-in, the React app uses `HttpGovernanceClient`, authenticated with the signed-in user's OIDC access token (authorization code + PKCE via `oidc-client-ts`). Runtime config (`apiUrl`, `oidcAuthority`, `oidcClientId`, `oidcScope`) comes from `/config.js` (`window.__AGENTGATE_CONFIG__`), rendered by the container entrypoint; empty OIDC values show an "SSO not configured" state.
 
 ```text
 React page
@@ -83,7 +83,7 @@ The client sends the administrator token as:
 Authorization: Bearer <admin-token>
 ```
 
-If `VITE_ADMIN_TOKEN` is missing, the app uses `MockGovernanceClient` and seeds deterministic demo policies. This is intentional for UI development, but it must not be mistaken for live backend data.
+In the dev server with `VITE_USE_MOCK=true` (and in tests), the app uses `MockGovernanceClient` and seeds deterministic demo policies. This is intentional for UI development, but it must not be mistaken for live backend data.
 
 ## 4. Live Connected Features
 
@@ -299,7 +299,7 @@ Terminal 2:
 
 ```powershell
 cd D:\agentgate-dev\frontend\app
-$env:VITE_ADMIN_TOKEN = "agentgate-admin-secret-dev"
+# Edit frontend/app/public/config.js: set apiUrl, oidcAuthority, oidcClientId
 npm run dev
 ```
 
@@ -320,7 +320,7 @@ $env:VITE_USE_MOCK = "true"
 npm run dev
 ```
 
-If no `VITE_ADMIN_TOKEN` is configured, the app also falls back to mock mode.
+Mock mode is never used in production builds; there is no static admin token in the UI.
 
 ## 10. Verification Commands
 

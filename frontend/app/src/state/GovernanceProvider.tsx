@@ -27,9 +27,9 @@ import { getConfig } from "../auth/config";
 import { getAccessToken } from "../auth/oidc";
 import { createHttpGovernanceClient } from "../auth/governanceHttp";
 import { useAuth } from "./AuthProvider";
+import { shouldReauth } from "./reauth";
 
-const REAUTH_KEY = "agentgate.reauth-at";
-const REAUTH_MIN_INTERVAL_MS = 30_000;
+
 
 const WORKSPACE_ID = "default";
 
@@ -76,13 +76,7 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
     // A 401 restarts SSO. Rate-limited so a token the API keeps rejecting
     // (e.g. missing role) cannot cause an endless redirect loop.
     const onUnauthorized = () => {
-      try {
-        const last = Number(sessionStorage.getItem(REAUTH_KEY) ?? "0");
-        if (Date.now() - last < REAUTH_MIN_INTERVAL_MS) return;
-        sessionStorage.setItem(REAUTH_KEY, String(Date.now()));
-      } catch {
-        // storage unavailable: still attempt login once per call
-      }
+      if (!shouldReauth()) return;
       void loginRef.current().catch(() => undefined);
     };
     return createHttpGovernanceClient(apiUrl, getAccessToken, onUnauthorized);

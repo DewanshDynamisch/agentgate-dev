@@ -33,6 +33,11 @@ function getManager(): UserManager {
     post_logout_redirect_uri: window.location.origin,
     response_type: "code",
     scope: c.oidcScope,
+    // Renewal uses the refresh_token grant (oidc-client-ts v3 signinSilent does
+    // this whenever the stored user has a refresh_token, which Keycloak's code
+    // flow returns by default), so no iframe/silent_redirect_uri page is needed.
+    // If the IdP issues no refresh token, renewal is not attempted and the
+    // 401 -> login() path restarts SSO.
     automaticSilentRenew: true,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
   });
@@ -43,16 +48,44 @@ function stringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
-/** Display-only mapping. The backend re-verifies the token and enforces roles. */
-export function toAppUser(user: Pick<User, "profile">): AppUser {
+function decodeJwtPayload(token: unknown): Record<string, unknown> {
+  if (typeof token !== "string") return {};
+  try {
+    const seg = token.split(".")[1];
+    if (!seg) return {};
+    const b64 = seg.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      Array.from(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)), (c) =>
+        "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
+      ).join("")
+    );
+    const parsed: unknown = JSON.parse(json);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function rolesFrom(claims: Record<string, unknown>): string[] {
+  const realm = (claims.realm_access as { roles?: unknown } | undefined)?.roles;
+  return [...stringArray(claims.roles), ...stringArray(realm)];
+}
+
+/**
+ * Display-only mapping for the UI gate. Roles come from the access token
+ * payload (Keycloak puts realm_access.roles there), decoded WITHOUT
+ * verification (the backend verifies the token and enforces roles), falling
+ * back to the ID-token profile claims. Malformed tokens yield no roles.
+ */
+export function toAppUser(user: Pick<User, "profile"> & { access_token?: string }): AppUser {
   const p = user.profile as Record<string, unknown>;
-  const realm = (p.realm_access as { roles?: unknown } | undefined)?.roles;
   const username =
     (typeof p.preferred_username === "string" && p.preferred_username) ||
     (typeof p.email === "string" && p.email) ||
     (typeof p.sub === "string" && p.sub) ||
     "unknown";
-  return { username, roles: [...stringArray(p.roles), ...stringArray(realm)] };
+  const roles = new Set([...rolesFrom(decodeJwtPayload(user.access_token)), ...rolesFrom(p)]);
+  return { username, roles: [...roles] };
 }
 
 export async function login(): Promise<void> {
@@ -60,12 +93,26 @@ export async function login(): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  await getManager().signoutRedirect();
+  const m = getManager();
+  try {
+    await m.signoutRedirect();
+  } catch {
+    // IdP without end_session_endpoint etc.: the local session must not survive.
+    await m.removeUser();
+  }
 }
 
 /** Resolves the current non-expired access token; throws when unauthenticated. */
 export async function getAccessToken(): Promise<string> {
-  const user = await getManager().getUser();
+  const m = getManager();
+  let user = await m.getUser();
+  if (user?.expired && user.refresh_token) {
+    try {
+      user = await m.signinSilent();
+    } catch {
+      user = null;
+    }
+  }
   if (!user || user.expired || !user.access_token) {
     throw new Error("Not authenticated");
   }
