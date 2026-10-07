@@ -41,7 +41,36 @@ function getManager(): UserManager {
     automaticSilentRenew: true,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
   });
+  singleFlightSilentRenew(manager);
   return manager;
+}
+
+/**
+ * Make every silent renewal (the library's automatic renewal and our own
+ * getAccessToken) share ONE in-flight refresh. With refresh-token rotation /
+ * reuse detection a second concurrent refresh would fail invalid_grant and
+ * bounce the user to login. Cleared on settle so a later call can retry.
+ */
+function singleFlightSilentRenew(m: UserManager): void {
+  const original = m.signinSilent.bind(m);
+  let inflight: Promise<User | null> | null = null;
+  m.signinSilent = (...args: Parameters<UserManager["signinSilent"]>) => {
+    if (!inflight) {
+      inflight = original(...args).finally(() => {
+        inflight = null;
+      });
+    }
+    return inflight;
+  };
+}
+
+/** Subscribe to user (re)loads such as silent renewals; returns an unsubscribe. */
+export function onUserLoaded(cb: (user: AppUser) => void): () => void {
+  if (!isSsoConfigured()) return () => undefined;
+  const events = getManager().events;
+  const handler = (u: User) => cb(toAppUser(u));
+  events.addUserLoaded(handler);
+  return () => events.removeUserLoaded(handler);
 }
 
 function stringArray(v: unknown): string[] {

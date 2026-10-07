@@ -33,6 +33,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => oidc.onUserLoaded((u) => setUser(u)), []);
+
   const completeLogin = useCallback(() => {
     // The authorization code is single-use: share one in-flight exchange (StrictMode double effects).
     if (!callbackRef.current) {

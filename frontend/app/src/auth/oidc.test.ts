@@ -7,6 +7,7 @@ const mgr = vi.hoisted(() => ({
   getUser: vi.fn(),
   signinSilent: vi.fn(),
   removeUser: vi.fn(async () => undefined),
+  events: { addUserLoaded: vi.fn(), removeUserLoaded: vi.fn() },
 }));
 const ctor = vi.hoisted(() => vi.fn());
 vi.mock("oidc-client-ts", () => ({
@@ -26,6 +27,8 @@ vi.mock("oidc-client-ts", () => ({
 
 import { getAccessToken, handleCallback, login, logout, resetOidcForTests, toAppUser } from "./oidc";
 
+const silent = vi.fn();
+
 function setConfig(c: Record<string, string>) {
   (window as unknown as Record<string, unknown>).__AGENTGATE_CONFIG__ = c;
 }
@@ -33,6 +36,7 @@ function setConfig(c: Record<string, string>) {
 beforeEach(() => {
   vi.clearAllMocks();
   resetOidcForTests();
+  mgr.signinSilent = silent;
   setConfig({ apiUrl: "", oidcAuthority: "https://idp.example/realms/ag", oidcClientId: "agentgate-ui", oidcScope: "" });
 });
 
@@ -87,17 +91,17 @@ describe("oidc", () => {
 
   it("renews an expired token via the refresh token (no iframe) before giving up", async () => {
     mgr.getUser.mockResolvedValueOnce({ access_token: "old", expired: true, refresh_token: "rt" });
-    mgr.signinSilent.mockResolvedValueOnce({ access_token: "new", expired: false });
+    silent.mockResolvedValueOnce({ access_token: "new", expired: false });
     await expect(getAccessToken()).resolves.toBe("new");
-    expect(mgr.signinSilent).toHaveBeenCalledTimes(1);
+    expect(silent).toHaveBeenCalledTimes(1);
   });
 
   it("does not attempt renewal without a refresh token, and fails closed if renewal fails", async () => {
     mgr.getUser.mockResolvedValueOnce({ access_token: "old", expired: true });
     await expect(getAccessToken()).rejects.toThrow(/not authenticated/i);
-    expect(mgr.signinSilent).not.toHaveBeenCalled();
+    expect(silent).not.toHaveBeenCalled();
     mgr.getUser.mockResolvedValueOnce({ access_token: "old", expired: true, refresh_token: "rt" });
-    mgr.signinSilent.mockRejectedValueOnce(new Error("invalid_grant"));
+    silent.mockRejectedValueOnce(new Error("invalid_grant"));
     await expect(getAccessToken()).rejects.toThrow(/not authenticated/i);
   });
 
@@ -126,6 +130,45 @@ describe("oidc", () => {
       for (const t of ["garbage", "a.%%%.c", "a.bm90anNvbg.c", "", undefined]) {
         expect(toAppUser({ access_token: t, profile: { sub: "s" } } as never).roles).toEqual([]);
       }
+    });
+  });
+
+  describe("single-flight renewal", () => {
+    const expired = { access_token: "old", expired: true, refresh_token: "rt" };
+
+    it("5 concurrent callers trigger exactly one renewal and all get the new token", async () => {
+      mgr.getUser.mockResolvedValue(expired);
+      let resolve!: (u: unknown) => void;
+      silent.mockReturnValue(new Promise((r) => (resolve = r)));
+      const calls = Array.from({ length: 5 }, () => getAccessToken());
+      await new Promise((r) => setTimeout(r, 10));
+      resolve({ access_token: "new", expired: false });
+      await expect(Promise.all(calls)).resolves.toEqual(Array(5).fill("new"));
+      expect(silent).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failing renewal rejects all callers and a later call can retry", async () => {
+      mgr.getUser.mockResolvedValue(expired);
+      silent.mockRejectedValueOnce(new Error("invalid_grant"));
+      const results = await Promise.allSettled(Array.from({ length: 5 }, () => getAccessToken()));
+      expect(results.every((r) => r.status === "rejected")).toBe(true);
+      expect(silent).toHaveBeenCalledTimes(1);
+      silent.mockResolvedValueOnce({ access_token: "new", expired: false });
+      await expect(getAccessToken()).resolves.toBe("new");
+      expect(silent).toHaveBeenCalledTimes(2);
+    });
+
+    it("library-driven renewals share the same in-flight call", async () => {
+      mgr.getUser.mockResolvedValue(expired);
+      let resolve!: (u: unknown) => void;
+      silent.mockReturnValue(new Promise((r) => (resolve = r)));
+      await login(); // builds and patches the manager
+      const lib = mgr.signinSilent();
+      const mine = getAccessToken();
+      await new Promise((r) => setTimeout(r, 10));
+      resolve({ access_token: "new", expired: false });
+      await Promise.all([lib, mine]);
+      expect(silent).toHaveBeenCalledTimes(1);
     });
   });
 });

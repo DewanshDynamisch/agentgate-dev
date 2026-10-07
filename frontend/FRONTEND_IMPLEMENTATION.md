@@ -80,7 +80,7 @@ The Vite development proxy is configured in `frontend/app/vite.config.ts`:
 The client sends the administrator token as:
 
 ```http
-Authorization: Bearer <admin-token>
+Authorization: Bearer <OIDC access token>
 ```
 
 In the dev server with `VITE_USE_MOCK=true` (and in tests), the app uses `MockGovernanceClient` and seeds deterministic demo policies. This is intentional for UI development, but it must not be mistaken for live backend data.

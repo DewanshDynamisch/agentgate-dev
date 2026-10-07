@@ -11,6 +11,7 @@ const oidc = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   isSsoConfigured: vi.fn(() => true),
   getAccessToken: vi.fn(),
+  onUserLoaded: vi.fn(() => () => undefined),
 }));
 vi.mock("./oidc", () => oidc);
 
@@ -85,5 +86,18 @@ describe("OIDC auth flow", () => {
     oidc.handleCallback.mockRejectedValue(new Error("bad state"));
     app("/auth/callback?code=abc");
     await waitFor(() => expect(screen.getByText(/sign-in failed/i)).toBeInTheDocument());
+  });
+
+  it("pushes a renewed user into state", async () => {
+    let cb: (u: unknown) => void = () => undefined;
+    oidc.onUserLoaded.mockImplementation(((f: (u: unknown) => void) => {
+      cb = f;
+      return () => undefined;
+    }) as never);
+    oidc.getCurrentUser.mockResolvedValue({ username: "alice", roles: ["viewer"] });
+    app("/");
+    expect(await screen.findByText(/not authorized/i)).toBeInTheDocument();
+    cb({ username: "alice", roles: ["agentgate-admin"] });
+    expect(await screen.findByText("secret console")).toBeInTheDocument();
   });
 });
