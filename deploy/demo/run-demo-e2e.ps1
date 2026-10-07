@@ -41,6 +41,7 @@ function Get-Sha12($text) {
     return (([System.BitConverter]::ToString($hash)) -replace "-", "").ToLower().Substring(0, 12)
 }
 
+$script:reclassStarted = $false
 # --- Runtime reclassification helpers (checks 8-13) ---
 $script:adminToken = if ($env:AGENTGATE_ADMIN_TOKEN) { $env:AGENTGATE_ADMIN_TOKEN } else { "agentgate-admin-secret-dev" }
 $script:gateBase   = "http://localhost:8091"
@@ -53,7 +54,7 @@ function Invoke-AdminToolCall {
 }
 
 function Test-CallAllowed($r) { return ($r.Code -eq 0) -and ($r.Out -match "Tool Call Succeeded") }
-function Test-CallDenied($r)  { return ($r.Code -ne 0) -and (($r.Err + $r.Out) -match "403") }
+function Test-CallDenied($r)  { return ($r.Code -ne 0) -and (($r.Err + $r.Out) -match "status 403(?![0-9])") }
 
 function Get-BootstrapTool($backend, $tool) {
     $doc = Get-Content -Raw $script:bootstrapFile | ConvertFrom-Json
@@ -181,7 +182,7 @@ function Invoke-Main {
     $unchanged = ($after.tickets.Count -eq $before.tickets.Count) -and ($after.count -eq $before.count)
     Add-Result "5 reader delete_ticket denied (403), state unchanged" ($forbidden -and $unchanged) ("403=$forbidden tickets " + $before.tickets.Count + "->" + $after.tickets.Count + " invocations " + $before.count + "->" + $after.count)
 
-    # 8. Audit rows carry credential ref
+    # 8a. Audit rows carry credential ref
     $sql = "SELECT decision, reason, downstream_credential_ref FROM audit_events ORDER BY sequence_number DESC LIMIT 5"
     $rows = docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c $sql | Out-String
     Write-Host $rows
@@ -190,19 +191,22 @@ function Invoke-Main {
     $allowRow = ($rows -split "`n") | Where-Object { $_ -match "^(?i)allow" -and $_ -match "\|jti:\S+" } | Select-Object -First 1
     Add-Result "7 ALLOW audit row has jti: downstream_credential_ref" ($null -ne $allowRow) ("" + $allowRow)
 
-
     # 8. Runtime reclassification (live catalog change)
     $c8 = Invoke-AdminToolCall
     Add-Result "8 admin update_ticket_status ALLOWED (baseline, risk=write)" (Test-CallAllowed $c8) ("exit=" + $c8.Code)
 
+    $baseCnt = (docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT count(*) FROM audit_events WHERE event_type='mutation' AND reason='tool_upserted'" | Out-String).Trim()
+
+    # From here on a failure must not leave the catalog reclassified: the finally block restores 'write'.
+    $script:reclassStarted = $true
     $putDestructive = Set-AllToolRisk "destructive"
     $isDestructive = Test-AllToolRisk "destructive"
     Add-Result "9 PUT risk=destructive for default + mcp-probe update_ticket_status" ($putDestructive -and $isDestructive) ("put=$putDestructive readback=$isDestructive")
+    if ($env:AGENTGATE_E2E_TEST_FAIL_AFTER_9 -eq "1") { throw "induced failure after check 9 (test hook)" }
 
     $c10 = Invoke-AdminToolCall
     $reasonRow = (docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT decision, reason FROM audit_events WHERE event_type <> 'mutation' ORDER BY sequence_number DESC LIMIT 1" | Out-String).Trim()
-    $c10Out = $c10.Err + $c10.Out
-    $reasonOk = ($c10Out -match "policy_deny") -or ($reasonRow -match "^(?i)deny\|policy_deny$")
+    $reasonOk = ($reasonRow -match "^(?i)deny\|policy_deny$")
     Add-Result "10 admin call denied after reclassification (403, policy_deny)" ((Test-CallDenied $c10) -and $reasonOk) ("403=" + (Test-CallDenied $c10) + " last_audit=" + $reasonRow)
 
     Write-Host "Restarting agentgate to prove persistence..." -ForegroundColor Yellow
@@ -210,21 +214,28 @@ function Invoke-Main {
     $up = $false
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Seconds 2
-        try { $h = Invoke-RestMethod -Uri "$($script:gateBase)/healthz" -TimeoutSec 2; if ($h -eq "ok") { $up = $true; break } } catch { }
+        try { Invoke-RestMethod -Uri "$($script:gateBase)/readyz" -TimeoutSec 2 | Out-Null; $up = $true; break } catch { }
     }
-    $persisted = $up -and (Test-AllToolRisk "destructive")
+    $persisted = $false
+    if ($up) {
+        for ($i = 0; $i -lt 15; $i++) {
+            if (Test-AllToolRisk "destructive") { $persisted = $true; break }
+            Start-Sleep -Seconds 2
+        }
+    }
     $c11 = $null; if ($up) { $c11 = Invoke-AdminToolCall }
     $stillDenied = ($null -ne $c11) -and (Test-CallDenied $c11)
-    Add-Result "11 reclassification survives agentgate restart (still destructive + denied)" ($persisted -and $stillDenied) ("healthy=$up catalog_destructive=$persisted denied=$stillDenied")
+    Add-Result "11 reclassification survives agentgate restart (still destructive + denied)" ($persisted -and $stillDenied) ("ready=$up catalog_destructive=$persisted denied=$stillDenied")
 
     $putWrite = Set-AllToolRisk "write"
     $isWrite = Test-AllToolRisk "write"
     $c12 = Invoke-AdminToolCall
     Add-Result "12 PUT back to write, admin call ALLOWED again" ($putWrite -and $isWrite -and (Test-CallAllowed $c12)) ("put=$putWrite readback=$isWrite exit=" + $c12.Code)
+    if ($putWrite -and $isWrite) { $script:reclassStarted = $false }
 
     $cnt = (docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT count(*) FROM audit_events WHERE event_type='mutation' AND reason='tool_upserted'" | Out-String).Trim()
-    $cntOk = ($cnt -match '^\d+$') -and ([int]$cnt -ge 4)
-    Add-Result "13 audit has >=4 mutation/tool_upserted rows" $cntOk ("count=$cnt")
+    $delta = -1; if (($cnt -match '^\d+$') -and ($baseCnt -match '^\d+$')) { $delta = [int]$cnt - [int]$baseCnt }
+    Add-Result "13 audit gained >=4 mutation/tool_upserted rows" ($delta -ge 4) ("baseline=$baseCnt now=$cnt delta=$delta")
 
     Write-Host ""
     $failed = @($results | Where-Object { -not $_.Ok })
@@ -237,6 +248,14 @@ function Invoke-Main {
 try {
     Invoke-Main
 } finally {
+    # Best-effort restore of the catalog if the reclassification phase did not finish cleanly.
+    # Errors are reported but never change the exit code decided by Invoke-Main.
+    if ($script:reclassStarted) {
+        try {
+            if (Set-AllToolRisk "write") { Write-Host "Restored update_ticket_status risk=write after incomplete run." -ForegroundColor Yellow }
+            else { Write-Host "WARNING: could not restore update_ticket_status risk=write; catalog may remain destructive" -ForegroundColor Red }
+        } catch { Write-Host ("WARNING: restore failed: " + $_.Exception.Message) -ForegroundColor Red }
+    }
     # Teardown runs on every exit path when -Down is requested.
     if ($Down) { docker compose -f $composeFile down -v | Out-Null }
 }
