@@ -41,6 +41,54 @@ function Get-Sha12($text) {
     return (([System.BitConverter]::ToString($hash)) -replace "-", "").ToLower().Substring(0, 12)
 }
 
+# --- Runtime reclassification helpers (checks 8-13) ---
+$script:adminToken = if ($env:AGENTGATE_ADMIN_TOKEN) { $env:AGENTGATE_ADMIN_TOKEN } else { "agentgate-admin-secret-dev" }
+$script:gateBase   = "http://localhost:8091"
+$script:catalogBackends = @("default", "mcp-probe")
+$script:bootstrapFile = Join-Path $repoRoot "deploy/shared/tools.bootstrap.json"
+
+function Invoke-AdminToolCall {
+    $a = '-args "{\"ticket_id\":\"TCK-1001\",\"new_status\":\"resolved\"}"'
+    return Invoke-Native "go" ("run -C `"$clientDir`" . -url http://localhost:3001 -tool update_ticket_status $a -agent-id agent-admin -roles admin -skip-init") $repoRoot
+}
+
+function Test-CallAllowed($r) { return ($r.Code -eq 0) -and ($r.Out -match "Tool Call Succeeded") }
+function Test-CallDenied($r)  { return ($r.Code -ne 0) -and (($r.Err + $r.Out) -match "403") }
+
+function Get-BootstrapTool($backend, $tool) {
+    $doc = Get-Content -Raw $script:bootstrapFile | ConvertFrom-Json
+    return ($doc.tools | Where-Object { $_.backend_id -eq $backend -and $_.tool_name -eq $tool } | Select-Object -First 1)
+}
+
+function Set-ToolRisk($backend, $tool, $risk) {
+    $def = Get-BootstrapTool $backend $tool
+    if ($null -eq $def) { return $false }
+    $body = [ordered]@{ risk = $risk; schema = $def.schema; arguments = @($def.arguments); description = "$($def.description)" }
+    $json = $body | ConvertTo-Json -Depth 10
+    try {
+        Invoke-RestMethod -Method Put -Uri "$($script:gateBase)/api/v1/tools/$backend/$tool" -Headers @{ Authorization = "Bearer $($script:adminToken)" } -ContentType "application/json" -Body $json -TimeoutSec 10 | Out-Null
+        return $true
+    } catch { Write-Host ("  PUT $backend/$tool failed: " + $_.Exception.Message) -ForegroundColor Red; return $false }
+}
+
+function Get-ToolRisk($backend, $tool) {
+    try {
+        $r = Invoke-RestMethod -Method Get -Uri "$($script:gateBase)/api/v1/tools/$backend/$tool" -Headers @{ Authorization = "Bearer $($script:adminToken)" } -TimeoutSec 10
+        return "$($r.risk)"
+    } catch { return "<error>" }
+}
+
+function Set-AllToolRisk($risk) {
+    $ok = $true
+    foreach ($b in $script:catalogBackends) { if (-not (Set-ToolRisk $b "update_ticket_status" $risk)) { $ok = $false } }
+    return $ok
+}
+
+function Test-AllToolRisk($risk) {
+    foreach ($b in $script:catalogBackends) { if ((Get-ToolRisk $b "update_ticket_status") -ne $risk) { return $false } }
+    return $true
+}
+
 $script:exitCode = 1
 
 function Invoke-Main {
@@ -141,6 +189,42 @@ function Invoke-Main {
     Add-Result "6 delete_ticket denied by policy (not a malformed request)" (($null -ne $denyRow) -and ($denyRow -notmatch "malformed")) ("" + $denyRow)
     $allowRow = ($rows -split "`n") | Where-Object { $_ -match "^(?i)allow" -and $_ -match "\|jti:\S+" } | Select-Object -First 1
     Add-Result "7 ALLOW audit row has jti: downstream_credential_ref" ($null -ne $allowRow) ("" + $allowRow)
+
+
+    # 8. Runtime reclassification (live catalog change)
+    $c8 = Invoke-AdminToolCall
+    Add-Result "8 admin update_ticket_status ALLOWED (baseline, risk=write)" (Test-CallAllowed $c8) ("exit=" + $c8.Code)
+
+    $putDestructive = Set-AllToolRisk "destructive"
+    $isDestructive = Test-AllToolRisk "destructive"
+    Add-Result "9 PUT risk=destructive for default + mcp-probe update_ticket_status" ($putDestructive -and $isDestructive) ("put=$putDestructive readback=$isDestructive")
+
+    $c10 = Invoke-AdminToolCall
+    $reasonRow = (docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT decision, reason FROM audit_events WHERE event_type <> 'mutation' ORDER BY sequence_number DESC LIMIT 1" | Out-String).Trim()
+    $c10Out = $c10.Err + $c10.Out
+    $reasonOk = ($c10Out -match "policy_deny") -or ($reasonRow -match "^(?i)deny\|policy_deny$")
+    Add-Result "10 admin call denied after reclassification (403, policy_deny)" ((Test-CallDenied $c10) -and $reasonOk) ("403=" + (Test-CallDenied $c10) + " last_audit=" + $reasonRow)
+
+    Write-Host "Restarting agentgate to prove persistence..." -ForegroundColor Yellow
+    docker compose -f $composeFile restart agentgate | Out-Null
+    $up = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        Start-Sleep -Seconds 2
+        try { $h = Invoke-RestMethod -Uri "$($script:gateBase)/healthz" -TimeoutSec 2; if ($h -eq "ok") { $up = $true; break } } catch { }
+    }
+    $persisted = $up -and (Test-AllToolRisk "destructive")
+    $c11 = $null; if ($up) { $c11 = Invoke-AdminToolCall }
+    $stillDenied = ($null -ne $c11) -and (Test-CallDenied $c11)
+    Add-Result "11 reclassification survives agentgate restart (still destructive + denied)" ($persisted -and $stillDenied) ("healthy=$up catalog_destructive=$persisted denied=$stillDenied")
+
+    $putWrite = Set-AllToolRisk "write"
+    $isWrite = Test-AllToolRisk "write"
+    $c12 = Invoke-AdminToolCall
+    Add-Result "12 PUT back to write, admin call ALLOWED again" ($putWrite -and $isWrite -and (Test-CallAllowed $c12)) ("put=$putWrite readback=$isWrite exit=" + $c12.Code)
+
+    $cnt = (docker compose -f $composeFile exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT count(*) FROM audit_events WHERE event_type='mutation' AND reason='tool_upserted'" | Out-String).Trim()
+    $cntOk = ($cnt -match '^\d+$') -and ([int]$cnt -ge 4)
+    Add-Result "13 audit has >=4 mutation/tool_upserted rows" $cntOk ("count=$cnt")
 
     Write-Host ""
     $failed = @($results | Where-Object { -not $_.Ok })
