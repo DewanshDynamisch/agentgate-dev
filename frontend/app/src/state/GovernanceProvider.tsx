@@ -24,6 +24,7 @@ import type {
   ValidateResponse,
 } from "@contract/models/governance";
 import { seedDemoPolicies } from "./seedDemoData";
+import { selectClientMode } from "../lib/clientMode";
 
 const WORKSPACE_ID = "default";
 
@@ -61,7 +62,8 @@ const GovernanceClientContext = createContext<GovernanceClientContextValue | nul
 export function GovernanceProvider({ children }: { children: ReactNode }) {
   const apiUrl = import.meta.env.VITE_API_URL || "";
   const adminToken = import.meta.env.VITE_ADMIN_TOKEN || "";
-  const useMock = import.meta.env.VITE_USE_MOCK === "true" || !adminToken;
+  // Mock only in tests or an explicit dev opt-in; production builds always use HTTP.
+  const useMock = selectClientMode(import.meta.env) === "mock";
   const client: GovernanceClient = useMemo(
     () => (useMock ? new MockGovernanceClient() : new HttpGovernanceClient(apiUrl, staticToken(adminToken))),
     [adminToken, apiUrl, useMock]
@@ -79,7 +81,7 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initialize = async () => {
-      if (useMock) {
+      if (useMock && !import.meta.env.PROD) {
         await seedDemoPolicies(client, WORKSPACE_ID);
       }
       await loadPolicies();
