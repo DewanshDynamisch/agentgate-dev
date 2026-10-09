@@ -277,36 +277,128 @@ if ($LASTEXITCODE -eq 0 -and $auditCheck -match "OK") {
 }
 
 # -------------------------------------------------------------------------
-# Step 11: Restart postgres and agentgate, repeat steps 6 and 10 (persistence proof)
+# Step 11: Restart postgres and agentgate, wait for readyz, test persistence
 # -------------------------------------------------------------------------
 Write-Host "`n--> Step 11: Restarting postgres and agentgate to prove persistence & chain continuity" -ForegroundColor Yellow
-& docker compose -f $composeFile restart postgres agentgate | Out-Null
-Start-Sleep -Seconds 5
 
-# Wait for AgentGate healthz again
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 2
-    try {
-        $res = curl -k -s -o /dev/null -w "%{http_code}" https://localhost:9443/healthz
-        if ($res -eq "200") { break }
-    } catch {}
+$step11Passed = $false
+$step11Error = ""
+$activeVersion = ""
+$expectedVersion = ""
+
+try {
+    # 1. Fetch baseline v1.0.0 policy
+    $basePolicyResp = curl -k -s https://localhost:9443/api/v1/workspaces/default/policies/v1.0.0 -H "Authorization: Bearer $adminToken"
+    $basePolicyObj = $basePolicyResp | ConvertFrom-Json
+    $newPolicyContent = $basePolicyObj.content + "`n// H2 verification"
+    
+    # Create candidate
+    $createBody = @{
+        content = $newPolicyContent
+        description = "H2 verification"
+    } | ConvertTo-Json -Depth 10 -Compress
+    
+    $createResp = curl -k -s -X POST https://localhost:9443/api/v1/workspaces/default/policies `
+        -H "Authorization: Bearer $adminToken" `
+        -H "Content-Type: application/json" `
+        -d $createBody
+        
+    $createObj = $createResp | ConvertFrom-Json
+    $expectedVersion = $createObj.version
+    if (-not $expectedVersion) {
+        throw "Failed to create candidate policy. Response: $createResp"
+    }
+    
+    # Activate candidate
+    $activateResp = curl -k -s -X POST https://localhost:9443/api/v1/workspaces/default/policies/$expectedVersion/activate `
+        -H "Authorization: Bearer $adminToken"
+        
+    $activateObj = $activateResp | ConvertFrom-Json
+    if ($activateObj.active_version -ne $expectedVersion) {
+        throw "Failed to activate candidate policy. Response: $activateResp"
+    }
+
+    # 2. Restart services
+    Write-Host "Restarting postgres and agentgate..."
+    & docker compose -f $composeFile restart postgres agentgate | Out-Null
+    
+    # 3. Wait for readyz
+    $ready = $false
+    for ($i = 0; $i -lt 45; $i++) {
+        Start-Sleep -Seconds 2
+        try {
+            $res = curl -k -s -o /dev/null -w "%{http_code}" https://localhost:9443/readyz
+            if ($res -eq "200") { 
+                $ready = $true
+                break 
+            }
+        } catch {}
+    }
+    if (-not $ready) {
+        throw "Timeout waiting for https://localhost:9443/readyz to return 200 (90s limit)."
+    }
+    
+    # 4. Call list_tickets with bounded retry
+    $listSuccess = $false
+    for ($i = 1; $i -le 20; $i++) {
+        Write-Host "list_tickets attempt $i..."
+        $listResp2 = curl -k -s -w "`n%{http_code}" -X POST https://localhost:3443/ `
+            -H "Authorization: Bearer $agentToken" `
+            -H "Content-Type: application/json" `
+            -d $listBody
+        $listLines2 = $listResp2 -split "`n"
+        $listCode2 = $listLines2[-1].Trim()
+        
+        if ($listCode2 -eq "200") {
+            $listSuccess = $true
+            break
+        }
+        Start-Sleep -Seconds 3
+    }
+    if (-not $listSuccess) {
+        throw "Failed to get 200 from list_tickets after 20 attempts. Last code: $listCode2"
+    }
+    
+    # 5. Fetch policy list/active version via Admin API
+    $policiesResp = curl -k -s https://localhost:9443/api/v1/workspaces/default/policies -H "Authorization: Bearer $adminToken"
+    $policiesObj = $policiesResp | ConvertFrom-Json
+    
+    foreach ($p in $policiesObj.policies) {
+        if ($p.state -eq "ACTIVE") {
+            $activeVersion = $p.version
+            break
+        }
+    }
+    
+    if ($activeVersion -ne $expectedVersion) {
+        throw "Active policy version mismatch. Expected $expectedVersion, got $activeVersion (v1.0.0 is the baseline)"
+    }
+    
+    # 6. Re-run verify-audit
+    $auditCheck2 = docker compose -f $composeFile exec -T agentgate agentgate verify-audit --workspace default
+    if ($LASTEXITCODE -ne 0 -or $auditCheck2 -notmatch "OK") {
+        throw "verify-audit failed: Exit=$LASTEXITCODE Output=$auditCheck2"
+    }
+
+    $step11Passed = $true
+} catch {
+    $step11Error = $_.Exception.Message
+} finally {
+    # 7. Cleanup: roll back/activate v1.0.0 again
+    Write-Host "Rolling back to baseline v1.0.0..."
+    $rollbackBody = @{
+        target_version = "v1.0.0"
+    } | ConvertTo-Json -Compress
+    curl -k -s -X POST https://localhost:9443/api/v1/workspaces/default/policies/rollback `
+        -H "Authorization: Bearer $adminToken" `
+        -H "Content-Type: application/json" `
+        -d $rollbackBody | Out-Null
 }
 
-# Repeat Step 6 call
-$listResp2 = curl -k -s -w "`n%{http_code}" -X POST https://localhost:3443/ `
-    -H "Authorization: Bearer $agentToken" `
-    -H "Content-Type: application/json" `
-    -d $listBody
-$listLines2 = $listResp2 -split "`n"
-$listCode2 = $listLines2[-1].Trim()
-
-# Repeat Step 10 check
-$auditCheck2 = docker compose -f $composeFile exec -T agentgate agentgate verify-audit --workspace default
-
-if ($listCode2 -eq "200" -and $LASTEXITCODE -eq 0 -and $auditCheck2 -match "OK") {
-    Record-Check 11 "Persistence and chain continuity verified after service restarts" $true "list_tickets=$listCode2, verify-audit=$auditCheck2"
+if ($step11Passed) {
+    Record-Check 11 "Persistence and chain continuity verified after service restarts" $true "Active=$activeVersion"
 } else {
-    Record-Check 11 "Persistence and chain continuity verified after service restarts" $false "list_tickets=$listCode2, verify-audit=$auditCheck2"
+    Record-Check 11 "Persistence and chain continuity verified after service restarts" $false "$step11Error"
     exit 1
 }
 
