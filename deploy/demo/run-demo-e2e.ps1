@@ -31,7 +31,7 @@ function Invoke-Native($file, $argString, $workDir) {
 }
 
 function Get-DemoState {
-    $json = docker compose -f $composeFile exec -T support-desk-mcp wget -qO- http://localhost:9200/_demo/state
+    $json = docker compose -f $composeFile exec -T agentgate wget -qO- http://support-desk-mcp:9200/_demo/state
     return ($json | Out-String | ConvertFrom-Json)
 }
 
@@ -112,7 +112,7 @@ function Invoke-Main {
         Start-Sleep -Seconds 2
         try {
             $gate = Invoke-RestMethod -Uri "http://localhost:8091/healthz" -TimeoutSec 2
-            $mcp = (docker compose -f $composeFile exec -T support-desk-mcp wget -qO- http://localhost:9200/healthz) | Out-String
+            $mcp = (docker compose -f $composeFile exec -T agentgate wget -qO- http://support-desk-mcp:9200/healthz) | Out-String
             $jwks = Invoke-RestMethod -Uri "http://localhost:8091/.well-known/jwks.json" -TimeoutSec 2
             if ($gate -eq "ok" -and $mcp -match "ok" -and $jwks.keys.Count -ge 1) { $healthy = $true; break }
         } catch { }
