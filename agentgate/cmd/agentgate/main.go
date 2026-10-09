@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -218,9 +219,22 @@ func runHealthcheck(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	checkURL := func(scheme string) (*http.Response, error) {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		c := &http.Client{Timeout: 3 * time.Second, Transport: tr}
+		return c.Get(fmt.Sprintf("%s://127.0.0.1:%s/healthz", scheme, port))
+	}
+
+	scheme := "http"
+	if os.Getenv("AGENTGATE_HTTP_TLS_CERT") != "" {
+		scheme = "https"
+	}
+	resp, err := checkURL(scheme)
+	if err != nil && scheme == "http" {
+		resp, err = checkURL("https")
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "healthcheck failed: %v\n", err)
 		return 1

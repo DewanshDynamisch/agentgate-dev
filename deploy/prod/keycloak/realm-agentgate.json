@@ -1,0 +1,229 @@
+{
+  "id": "agentgate",
+  "realm": "agentgate",
+  "enabled": true,
+  "displayName": "AgentGate Realm",
+  "roles": {
+    "realm": [
+      {
+        "name": "agentgate-admin",
+        "description": "Administrator of AgentGate governance API and UI"
+      },
+      {
+        "name": "reader",
+        "description": "Read-only agent role"
+      },
+      {
+        "name": "admin",
+        "description": "Admin agent role"
+      },
+      {
+        "name": "payer",
+        "description": "Payer agent role"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "agentgate-admin-ui",
+      "name": "AgentGate Admin UI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "https://localhost:8444",
+      "baseUrl": "https://localhost:8444",
+      "redirectUris": [
+        "https://localhost:8444/*"
+      ],
+      "webOrigins": [
+        "https://localhost:8444"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://localhost:8444/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-agentgate-admin-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-admin-api",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agentgate-ops-cli",
+      "name": "AgentGate Ops CLI",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${OPS_CLI_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-agentgate-admin-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-admin-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agent-reader",
+      "name": "Agent Reader",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${AGENT_READER_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-gateway",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agent-admin",
+      "name": "Agent Admin",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${AGENT_ADMIN_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-gateway",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@agentgate.local",
+      "firstName": "AgentGate",
+      "lastName": "Administrator",
+      "realmRoles": [
+        "agentgate-admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${ADMIN_INITIAL_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "service-account-agent-reader",
+      "enabled": true,
+      "serviceAccountClientId": "agent-reader",
+      "realmRoles": [
+        "reader"
+      ]
+    },
+    {
+      "username": "service-account-agent-admin",
+      "enabled": true,
+      "serviceAccountClientId": "agent-admin",
+      "realmRoles": [
+        "admin"
+      ]
+    },
+    {
+      "username": "service-account-agentgate-ops-cli",
+      "enabled": true,
+      "serviceAccountClientId": "agentgate-ops-cli",
+      "realmRoles": [
+        "agentgate-admin"
+      ]
+    }
+  ]
+}

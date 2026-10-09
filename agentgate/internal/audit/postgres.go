@@ -95,7 +95,9 @@ func (s *PostgresStore) AppendDecision(ctx context.Context, record DecisionRecor
 	}
 
 	if record.Timestamp.IsZero() {
-		record.Timestamp = time.Now().UTC()
+		record.Timestamp = time.Now().UTC().Truncate(time.Microsecond)
+	} else {
+		record.Timestamp = record.Timestamp.Truncate(time.Microsecond)
 	}
 
 	if record.EventType == "" {

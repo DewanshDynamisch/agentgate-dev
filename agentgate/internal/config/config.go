@@ -152,6 +152,13 @@ func Load() (Config, error) {
 
 	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", "")
 	cfg.AuditSalt = getEnv(envPrefix+"AUDIT_SALT", "")
+	if cfg.AuditSalt == "" {
+		if file := getEnv(envPrefix+"AUDIT_SALT_FILE", ""); file != "" {
+			if data, err := os.ReadFile(strings.TrimSpace(file)); err == nil {
+				cfg.AuditSalt = strings.TrimSpace(string(data))
+			}
+		}
+	}
 
 	dbAllowInsecureStr := getEnv(envPrefix+"DB_ALLOW_INSECURE", "false")
 	dbAllowInsecure, err := strconv.ParseBool(dbAllowInsecureStr)
@@ -203,6 +210,13 @@ func Load() (Config, error) {
 	}
 
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
+	if cfg.DatabaseURL == "" {
+		if file := getEnv(envPrefix+"DATABASE_URL_FILE", ""); file != "" {
+			if data, err := os.ReadFile(strings.TrimSpace(file)); err == nil {
+				cfg.DatabaseURL = strings.TrimSpace(string(data))
+			}
+		}
+	}
 
 	defaultAutoMigrate := cfg.Environment != "production"
 	autoMigrateStr := getEnv(envPrefix+"AUTO_MIGRATE", "")

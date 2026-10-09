@@ -1,0 +1,56 @@
+# AgentGate — Production Gateway Configuration
+# Pinned to cr.agentgateway.dev/agentgateway:v1.4.0@sha256:771afaf093065477fa296eb90dcb618a0300165f12a32f80bbdd1427fab900ec
+#
+# STEP 1 VERIFICATION FINDINGS:
+# 1. Listener TLS: agentgateway v1.4.0 supports gateways.<name>.tls with `cert` and `key`
+#    (protocol: HTTPS). Field names `certificate` / `privateKey` are rejected by schema validation.
+# 2. ExtAuthz upstream mTLS: agentgateway v1.4.0 supports extAuthz.policies.backendTLS with `root`
+#    (internal CA), `cert` (client certificate), and `key` (client private key).
+# 3. JWKS verification: While agentgateway schema allows `jwks.url`, remote fetching during container
+#    startup fails before the IdP is healthy and does not accept self-signed internal CA without
+#    in-depth trust store injection. Using `jwks.file: /etc/agentgateway/jwks/keycloak-jwks.json`
+#    (fetched from Keycloak's certs endpoint by init-secrets.ps1 / clean-room.ps1 once Keycloak is healthy)
+#    is the proven, reliable, and deterministic method for standalone production topologies.
+# 4. Roles claim parsing: In Keycloak, agent service accounts emit roles as a JSON array (multivalued
+#    claim). AgentGate's structpbValueToString in internal/authz/adapter.go translates ListValue items
+#    joined with identity.RolesSeparator (" "), which internal/identity.splitRoles parses into
+#    the identity roles slice.
+
+gateways:
+  default:
+    port: 3000
+    protocol: HTTPS
+    tls:
+      cert: /etc/agentgateway/certs/agentgateway.crt
+      key: /etc/agentgateway/certs/agentgateway.key
+
+    # JWT validation at gateway boundary:
+    # Requires tokens signed by Keycloak for realm 'agentgate' and audience 'agentgate-gateway'.
+    jwtAuth:
+      mode: strict
+      issuer: https://keycloak:8443/realms/agentgate
+      audiences:
+        - agentgate-gateway
+      jwks:
+        file: /etc/agentgateway/jwks/keycloak-jwks.json
+
+routes:
+  - policies:
+      extAuthz:
+        host: agentgate:9001
+        policies:
+          backendTLS:
+            root: /etc/agentgateway/certs/ca.crt
+            cert: /etc/agentgateway/certs/client.crt
+            key: /etc/agentgateway/certs/client.key
+          http:
+            requestTimeout: 5s
+        protocol:
+          grpc: {}
+        failureMode: deny
+        includeRequestBody:
+          maxRequestBytes: 1048576
+          allowPartialMessage: false
+          packAsBytes: false
+    backends:
+      - host: support-desk-mcp:9200

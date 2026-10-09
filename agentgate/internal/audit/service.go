@@ -165,7 +165,7 @@ func (s *AuditedDecisionService) EvaluateWithCredential(ctx context.Context, req
 	record := DecisionRecord{
 		WorkspaceID:         req.WorkspaceID,
 		ExecutionID:         req.ExecutionID,
-		Timestamp:           time.Now().UTC(),
+		Timestamp:           time.Now().UTC().Truncate(time.Microsecond),
 		EventType:           EventTypeDecision,
 		Decision:            string(res.Decision),
 		Reason:              string(res.Reason),
@@ -240,7 +240,7 @@ func (s *AuditedDecisionService) OnMutation(ctx context.Context, event auditeven
 	record := DecisionRecord{
 		WorkspaceID:       event.WorkspaceID,
 		ExecutionID:       event.CorrelationID,
-		Timestamp:         event.Timestamp,
+		Timestamp:         event.Timestamp.Truncate(time.Microsecond),
 		EventType:         EventTypeMutation,
 		Decision:          "MUTATION",
 		Reason:            string(event.Action),
