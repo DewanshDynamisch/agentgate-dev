@@ -159,14 +159,20 @@ func Load() (Config, error) {
 	cfg.OIDCAudience = strings.TrimSpace(getEnv(envPrefix+"OIDC_AUDIENCE", ""))
 	cfg.OIDCAdminRole = strings.TrimSpace(getEnv(envPrefix+"OIDC_ADMIN_ROLE", defaultOIDCAdminRole))
 	cfg.OIDCRoleClaimPath = strings.TrimSpace(getEnv(envPrefix+"OIDC_ROLE_CLAIM_PATH", ""))
-	mode := strings.ToLower(strings.TrimSpace(getEnv(envPrefix+"ADMIN_AUTH_MODE", "static")))
-	if mode != "static" && mode != "oidc" {
-		return Config{}, fmt.Errorf("config: invalid %sADMIN_AUTH_MODE %q (want oidc|static)", envPrefix, mode)
+	rawMode := strings.TrimSpace(getEnv(envPrefix+"ADMIN_AUTH_MODE", ""))
+	if rawMode != "" {
+		mode := strings.ToLower(rawMode)
+		if mode != "static" && mode != "oidc" {
+			return Config{}, fmt.Errorf("config: invalid %sADMIN_AUTH_MODE %q (want oidc|static)", envPrefix, mode)
+		}
+		cfg.AdminAuthMode = mode
+	} else {
+		if cfg.Environment == "production" {
+			cfg.AdminAuthMode = "oidc"
+		} else {
+			cfg.AdminAuthMode = "static"
+		}
 	}
-	if cfg.Environment == "production" {
-		mode = "oidc" // production never uses the shared static admin token
-	}
-	cfg.AdminAuthMode = mode
 
 	if cfg.Environment != "production" && cfg.AdminAuthMode == "static" && strings.TrimSpace(cfg.AdminToken) == "" {
 		b := make([]byte, 16)
@@ -204,18 +210,6 @@ func Load() (Config, error) {
 	}
 	cfg.RequireDownstreamCredential = require
 
-	if cfg.AdminAuthMode == "oidc" {
-		if cfg.OIDCIssuerURL == "" {
-			return Config{}, fmt.Errorf("config: %sOIDC_ISSUER_URL is required when admin auth mode is oidc", envPrefix)
-		}
-		if cfg.OIDCAudience == "" {
-			return Config{}, fmt.Errorf("config: %sOIDC_AUDIENCE is required when admin auth mode is oidc", envPrefix)
-		}
-		if cfg.OIDCAdminRole == "" {
-			return Config{}, fmt.Errorf("config: %sOIDC_ADMIN_ROLE must not be empty", envPrefix)
-		}
-	}
-
 	return cfg, nil
 }
 
@@ -232,6 +226,12 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, fmt.Sprintf("%sSHUTDOWN_TIMEOUT must be positive, got %s", envPrefix, c.ShutdownTimeout))
+	}
+	if c.AdminRateLimit <= 0 {
+		errs = append(errs, fmt.Sprintf("%sADMIN_RATE_LIMIT must be positive, got %v", envPrefix, c.AdminRateLimit))
+	}
+	if c.AdminRateBurst <= 0 {
+		errs = append(errs, fmt.Sprintf("%sADMIN_RATE_BURST must be positive, got %d", envPrefix, c.AdminRateBurst))
 	}
 
 	if c.Environment == "production" {
@@ -251,6 +251,8 @@ func (c Config) Validate() error {
 			} else {
 				errs = append(errs, "ADMIN_AUTH_MODE cannot be static in production")
 			}
+		} else if strings.TrimSpace(c.AdminToken) != "" {
+			errs = append(errs, "ADMIN_TOKEN must not be set in production (admin auth mode is oidc)")
 		}
 
 		if strings.TrimSpace(c.CredentialSigningKeyFile) == "" {

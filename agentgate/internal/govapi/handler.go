@@ -1,6 +1,7 @@
 package govapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
+	"github.com/Dynamisch-LLC/agentgate/internal/auditevents"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 	"github.com/Dynamisch-LLC/agentgate/internal/governanceintegration"
 	"github.com/Dynamisch-LLC/agentgate/internal/policy"
@@ -79,6 +81,13 @@ func (h *Handler) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			key := clientIP(r)
 			if p, ok := PrincipalFromContext(r.Context()); ok && p.Subject != "" {
 				key = p.Subject
+			} else if auth := h.authenticator(); auth != nil {
+				if p, err := auth.Authenticate(r); err == nil && p.Subject != "" {
+					key = p.Subject
+					ctx := context.WithValue(r.Context(), principalCtxKey{}, p)
+					ctx = auditevents.WithActor(ctx, p.ActorName())
+					r = r.WithContext(ctx)
+				}
 			}
 			if !h.limiter.Allow(key) {
 				w.Header().Set("Retry-After", "1")
@@ -104,16 +113,17 @@ func (h *Handler) bodyLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+		if client := strings.TrimSpace(parts[0]); client != "" {
+			return client
+		}
 	}
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return strings.TrimSpace(xrip)
+	if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+		return xrip
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && strings.TrimSpace(host) != "" {
+		return strings.TrimSpace(host)
 	}
-	return r.RemoteAddr
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -132,7 +142,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	protect := func(fn http.HandlerFunc) http.HandlerFunc {
-		return AdminAuthMiddlewareWith(h.authenticator(), h.rateLimitMiddleware(h.bodyLimitMiddleware(fn)))
+		return h.rateLimitMiddleware(h.bodyLimitMiddleware(AdminAuthMiddlewareWith(h.authenticator(), fn)))
 	}
 
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/validate", protect(h.handleValidate))

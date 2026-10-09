@@ -107,6 +107,10 @@ func AdminAuthMiddleware(adminToken string, next http.HandlerFunc) http.HandlerF
 // its actor name for audit attribution) in the request context.
 func AdminAuthMiddlewareWith(auth AdminAuthenticator, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := PrincipalFromContext(r.Context()); ok {
+			next(w, r)
+			return
+		}
 		p, err := auth.Authenticate(r)
 		if err != nil {
 			switch {
