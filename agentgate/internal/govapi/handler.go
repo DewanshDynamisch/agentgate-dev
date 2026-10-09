@@ -3,8 +3,10 @@ package govapi
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/policy"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
+	"github.com/Dynamisch-LLC/agentgate/internal/ratelimit"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolregistry"
 )
 
@@ -27,6 +30,7 @@ type Handler struct {
 	catalogMu      sync.Mutex
 	adminToken     string
 	auth           AdminAuthenticator
+	limiter        *ratelimit.Limiter
 }
 
 // NewHandler constructs a new Handler.
@@ -41,6 +45,7 @@ func NewHandler(manager *policymanager.Manager, adminToken string, govIntegratio
 		auditStore:     auditStore,
 		toolRegistry:   toolRegistry,
 		adminToken:     adminToken,
+		limiter:        ratelimit.New(20, 40),
 	}
 }
 
@@ -56,6 +61,9 @@ func NewHandlerWithCatalog(manager *policymanager.Manager, adminToken string, go
 // OIDC). It must be called before RegisterRoutes.
 func (h *Handler) SetAuthenticator(a AdminAuthenticator) { h.auth = a }
 
+// SetRateLimiter sets the rate limiter for governance routes.
+func (h *Handler) SetRateLimiter(l *ratelimit.Limiter) { h.limiter = l }
+
 func (h *Handler) authenticator() AdminAuthenticator {
 	if h.auth != nil {
 		return h.auth
@@ -63,10 +71,68 @@ func (h *Handler) authenticator() AdminAuthenticator {
 	return NewStaticTokenAuthenticator(h.adminToken)
 }
 
+const bodyLimitBytes = 1 << 20 // 1 MiB
+
+func (h *Handler) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.limiter != nil {
+			key := clientIP(r)
+			if p, ok := PrincipalFromContext(r.Context()); ok && p.Subject != "" {
+				key = p.Subject
+			}
+			if !h.limiter.Allow(key) {
+				w.Header().Set("Retry-After", "1")
+				writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func (h *Handler) bodyLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > bodyLimitBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds 1 MiB")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, bodyLimitBytes)
+		next(w, r)
+	}
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return strings.TrimSpace(xrip)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds 1 MiB")
+			return err
+		}
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+		return err
+	}
+	return nil
+}
+
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	protect := func(fn http.HandlerFunc) http.HandlerFunc {
-		return AdminAuthMiddlewareWith(h.authenticator(), fn)
+		return AdminAuthMiddlewareWith(h.authenticator(), h.rateLimitMiddleware(h.bodyLimitMiddleware(fn)))
 	}
 
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/validate", protect(h.handleValidate))
@@ -87,8 +153,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req ValidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -115,8 +180,7 @@ func (h *Handler) handleCreateCandidate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req CreateCandidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -215,8 +279,7 @@ func (h *Handler) handleRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RollbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -254,8 +317,7 @@ func (h *Handler) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req PreviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -308,8 +370,7 @@ func (h *Handler) handleDryRunCompare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DryRunCompareRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 

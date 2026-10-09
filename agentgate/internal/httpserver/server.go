@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
 // Server serves AgentGate's HTTP endpoints.
@@ -35,7 +36,15 @@ func New(addr string, logger *slog.Logger) *Server {
 		addr:   addr,
 		logger: logger,
 		mux:    mux,
-		srv:    &http.Server{Handler: mux},
+		srv: &http.Server{
+			Addr:              addr,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+		},
 	}
 
 	mux.HandleFunc("/healthz", s.handleHealthz)
@@ -47,6 +56,11 @@ func New(addr string, logger *slog.Logger) *Server {
 // Mux returns the server's HTTP ServeMux to register additional routes.
 func (s *Server) Mux() *http.ServeMux {
 	return s.mux
+}
+
+// HTTPServer returns the underlying http.Server instance.
+func (s *Server) HTTPServer() *http.Server {
+	return s.srv
 }
 
 // SetReadinessCheck sets an optional check (e.g. DB ping) for the /readyz endpoint.

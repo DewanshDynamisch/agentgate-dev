@@ -119,3 +119,25 @@ func TestServerReadinessCheckWithDependency(t *testing.T) {
 		t.Errorf("expected 200 when dependency healthy, got %d", resp2.StatusCode)
 	}
 }
+
+func TestServerHardenedTimeouts(t *testing.T) {
+	s := httpserver.New("127.0.0.1:0", newTestLogger())
+	hs := s.HTTPServer()
+
+	if hs.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want 5s", hs.ReadHeaderTimeout)
+	}
+	if hs.ReadTimeout != 15*time.Second {
+		t.Errorf("ReadTimeout = %v, want 15s", hs.ReadTimeout)
+	}
+	if hs.WriteTimeout != 30*time.Second {
+		t.Errorf("WriteTimeout = %v, want 30s", hs.WriteTimeout)
+	}
+	if hs.IdleTimeout != 120*time.Second {
+		t.Errorf("IdleTimeout = %v, want 120s", hs.IdleTimeout)
+	}
+	if hs.MaxHeaderBytes != 1<<20 {
+		t.Errorf("MaxHeaderBytes = %v, want 1 MiB", hs.MaxHeaderBytes)
+	}
+}
+

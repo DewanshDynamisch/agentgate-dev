@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
@@ -57,6 +58,9 @@ func NewServerWithOptions(adapter *Adapter, decisionSvc DecisionEvaluator, opts 
 
 // Check evaluates an incoming Envoy v3 ext_authz CheckRequest.
 func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
 	if s.adapter == nil {
 		return s.buildDeniedResponse(decision.ReasonEvaluationError, "adapter not configured", ""), nil
 	}
@@ -95,16 +99,39 @@ func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.C
 		return s.buildDeniedResponse(decision.ReasonEvaluationError, "decision service not configured", decisionReq.ExecutionID), nil
 	}
 
+	type evalResult struct {
+		res  decision.Result
+		cred *credential.Credential
+		err  error
+	}
+
+	evalCh := make(chan evalResult, 1)
+	go func() {
+		var (
+			res  decision.Result
+			cred *credential.Credential
+			err  error
+		)
+		if ce, ok := s.decisionSvc.(CredentialedEvaluator); ok {
+			res, cred, err = ce.EvaluateWithCredential(ctx, decisionReq)
+		} else {
+			res, err = s.decisionSvc.Evaluate(ctx, decisionReq)
+		}
+		evalCh <- evalResult{res: res, cred: cred, err: err}
+	}()
+
 	var (
 		res  decision.Result
 		cred *credential.Credential
 		err  error
 	)
-	if ce, ok := s.decisionSvc.(CredentialedEvaluator); ok {
-		res, cred, err = ce.EvaluateWithCredential(ctx, decisionReq)
-	} else {
-		res, err = s.decisionSvc.Evaluate(ctx, decisionReq)
+	select {
+	case out := <-evalCh:
+		res, cred, err = out.res, out.cred, out.err
+	case <-ctx.Done():
+		return s.buildDeniedResponse(decision.ReasonEvaluationError, ctx.Err().Error(), decisionReq.ExecutionID), nil
 	}
+
 	if err != nil {
 		return s.buildDeniedResponse(decision.ReasonEvaluationError, err.Error(), decisionReq.ExecutionID), nil
 	}

@@ -10,6 +10,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,7 +28,6 @@ const (
 	defaultAuthzGRPCAddr   = ":9001"
 	defaultLogLevel        = "info"
 	defaultShutdownTimeout = 10 * time.Second
-	defaultAdminToken      = "agentgate-admin-secret-dev"
 	defaultOIDCAdminRole   = "agentgate-admin"
 )
 
@@ -67,7 +68,18 @@ type Config struct {
 
 	// DatabaseURL is the PostgreSQL connection string for persistent policy storage.
 	// If empty, AgentGate runs with an in-memory policy store.
-	DatabaseURL string
+	DatabaseURL     string
+	DBAllowInsecure bool
+
+	// AuditSalt is the deployment salt for argument hashing.
+	AuditSalt string
+
+	// AdminRateLimit and AdminRateBurst configure the admin API token bucket rate limiter.
+	AdminRateLimit float64
+	AdminRateBurst int
+
+	// AdminTokenGenerated indicates whether a random admin token was generated for development.
+	AdminTokenGenerated bool
 
 	// ToolBootstrapFile is an optional JSON file that seeds the tool catalog when it is empty.
 	ToolBootstrapFile string
@@ -119,7 +131,30 @@ func Load() (Config, error) {
 	}
 	cfg.ShutdownTimeout = timeout
 
-	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", defaultAdminToken)
+	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", "")
+	cfg.AuditSalt = getEnv(envPrefix+"AUDIT_SALT", "")
+
+	dbAllowInsecureStr := getEnv(envPrefix+"DB_ALLOW_INSECURE", "false")
+	dbAllowInsecure, err := strconv.ParseBool(dbAllowInsecureStr)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: invalid %sDB_ALLOW_INSECURE %q: %w", envPrefix, dbAllowInsecureStr, err)
+	}
+	cfg.DBAllowInsecure = dbAllowInsecure
+
+	rateLimitStr := getEnv(envPrefix+"ADMIN_RATE_LIMIT", "20")
+	rateLimit, err := strconv.ParseFloat(rateLimitStr, 64)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: invalid %sADMIN_RATE_LIMIT %q: %w", envPrefix, rateLimitStr, err)
+	}
+	cfg.AdminRateLimit = rateLimit
+
+	rateBurstStr := getEnv(envPrefix+"ADMIN_RATE_BURST", "40")
+	rateBurst, err := strconv.Atoi(rateBurstStr)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: invalid %sADMIN_RATE_BURST %q: %w", envPrefix, rateBurstStr, err)
+	}
+	cfg.AdminRateBurst = rateBurst
+
 	cfg.OIDCIssuerURL = strings.TrimSpace(getEnv(envPrefix+"OIDC_ISSUER_URL", ""))
 	cfg.OIDCAudience = strings.TrimSpace(getEnv(envPrefix+"OIDC_AUDIENCE", ""))
 	cfg.OIDCAdminRole = strings.TrimSpace(getEnv(envPrefix+"OIDC_ADMIN_ROLE", defaultOIDCAdminRole))
@@ -132,6 +167,16 @@ func Load() (Config, error) {
 		mode = "oidc" // production never uses the shared static admin token
 	}
 	cfg.AdminAuthMode = mode
+
+	if cfg.Environment != "production" && cfg.AdminAuthMode == "static" && strings.TrimSpace(cfg.AdminToken) == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return Config{}, fmt.Errorf("config: generate random admin token: %w", err)
+		}
+		cfg.AdminToken = hex.EncodeToString(b)
+		cfg.AdminTokenGenerated = true
+	}
+
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
 	cfg.ToolBootstrapFile = strings.TrimSpace(getEnv(envPrefix+"TOOL_BOOTSTRAP_FILE", ""))
 
@@ -159,8 +204,16 @@ func Load() (Config, error) {
 	}
 	cfg.RequireDownstreamCredential = require
 
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
+	if cfg.AdminAuthMode == "oidc" {
+		if cfg.OIDCIssuerURL == "" {
+			return Config{}, fmt.Errorf("config: %sOIDC_ISSUER_URL is required when admin auth mode is oidc", envPrefix)
+		}
+		if cfg.OIDCAudience == "" {
+			return Config{}, fmt.Errorf("config: %sOIDC_AUDIENCE is required when admin auth mode is oidc", envPrefix)
+		}
+		if cfg.OIDCAdminRole == "" {
+			return Config{}, fmt.Errorf("config: %sOIDC_ADMIN_ROLE must not be empty", envPrefix)
+		}
 	}
 
 	return cfg, nil
@@ -169,28 +222,69 @@ func Load() (Config, error) {
 // Validate fails clearly when required configuration is missing or
 // nonsensical, rather than letting AgentGate start in an undefined state.
 func (c Config) Validate() error {
+	var errs []string
+
 	if strings.TrimSpace(c.HTTPAddr) == "" {
-		return fmt.Errorf("config: %sHTTP_ADDR must not be empty", envPrefix)
+		errs = append(errs, fmt.Sprintf("%sHTTP_ADDR must not be empty", envPrefix))
 	}
 	if strings.TrimSpace(c.AuthzGRPCAddr) == "" {
-		return fmt.Errorf("config: %sAUTHZ_GRPC_ADDR must not be empty", envPrefix)
+		errs = append(errs, fmt.Sprintf("%sAUTHZ_GRPC_ADDR must not be empty", envPrefix))
 	}
 	if c.ShutdownTimeout <= 0 {
-		return fmt.Errorf("config: %sSHUTDOWN_TIMEOUT must be positive, got %s", envPrefix, c.ShutdownTimeout)
+		errs = append(errs, fmt.Sprintf("%sSHUTDOWN_TIMEOUT must be positive, got %s", envPrefix, c.ShutdownTimeout))
 	}
-	if strings.TrimSpace(c.AdminToken) == "" {
-		return fmt.Errorf("config: %sADMIN_TOKEN must not be empty", envPrefix)
+
+	if c.Environment == "production" {
+		if strings.TrimSpace(c.DatabaseURL) == "" {
+			errs = append(errs, fmt.Sprintf("%sDATABASE_URL must not be empty in production (DatabaseURL is empty)", envPrefix))
+		} else if strings.Contains(c.DatabaseURL, "sslmode=disable") && !c.DBAllowInsecure {
+			errs = append(errs, fmt.Sprintf("%sDATABASE_URL contains sslmode=disable without %sDB_ALLOW_INSECURE=true", envPrefix, envPrefix))
+		}
+
+		if strings.TrimSpace(c.AuditSalt) == "" || c.AuditSalt == "audit-salt-demo-dev-fixture" {
+			errs = append(errs, fmt.Sprintf("%sAUDIT_SALT is empty or equals audit-salt-demo-dev-fixture", envPrefix))
+		}
+
+		if c.AdminAuthMode == "static" {
+			if strings.TrimSpace(c.AdminToken) != "" {
+				errs = append(errs, "AdminToken is non-empty while mode is static (admin auth mode cannot be static in production)")
+			} else {
+				errs = append(errs, "ADMIN_AUTH_MODE cannot be static in production")
+			}
+		}
+
+		if strings.TrimSpace(c.CredentialSigningKeyFile) == "" {
+			errs = append(errs, fmt.Sprintf("%sCREDENTIAL_SIGNING_KEY_FILE is empty (CredentialSigningKeyFile is empty)", envPrefix))
+		}
+
+		if strings.TrimSpace(c.OIDCIssuerURL) == "" || strings.TrimSpace(c.OIDCAudience) == "" {
+			errs = append(errs, fmt.Sprintf("OIDC issuer or audience is empty (%sOIDC_ISSUER_URL or %sOIDC_AUDIENCE)", envPrefix, envPrefix))
+		}
+		if strings.TrimSpace(c.OIDCAdminRole) == "" {
+			errs = append(errs, fmt.Sprintf("%sOIDC_ADMIN_ROLE must not be empty", envPrefix))
+		}
+
+		if len(c.CredentialAudiences) == 0 {
+			errs = append(errs, fmt.Sprintf("%sCREDENTIAL_AUDIENCES is empty (CredentialAudiences is empty)", envPrefix))
+		}
+
+		// TLS is not configured (Task 18 fields; add the check in Task 18).
+	} else {
+		if c.AdminAuthMode == "oidc" {
+			if strings.TrimSpace(c.OIDCIssuerURL) == "" {
+				errs = append(errs, fmt.Sprintf("%sOIDC_ISSUER_URL is required when admin auth mode is oidc", envPrefix))
+			}
+			if strings.TrimSpace(c.OIDCAudience) == "" {
+				errs = append(errs, fmt.Sprintf("%sOIDC_AUDIENCE is required when admin auth mode is oidc", envPrefix))
+			}
+			if strings.TrimSpace(c.OIDCAdminRole) == "" {
+				errs = append(errs, fmt.Sprintf("%sOIDC_ADMIN_ROLE must not be empty", envPrefix))
+			}
+		}
 	}
-	if c.AdminAuthMode == "oidc" {
-		if c.OIDCIssuerURL == "" {
-			return fmt.Errorf("config: %sOIDC_ISSUER_URL is required when admin auth mode is oidc", envPrefix)
-		}
-		if c.OIDCAudience == "" {
-			return fmt.Errorf("config: %sOIDC_AUDIENCE is required when admin auth mode is oidc", envPrefix)
-		}
-		if c.OIDCAdminRole == "" {
-			return fmt.Errorf("config: %sOIDC_ADMIN_ROLE must not be empty", envPrefix)
-		}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("config: %s", strings.Join(errs, "; "))
 	}
 	return nil
 }

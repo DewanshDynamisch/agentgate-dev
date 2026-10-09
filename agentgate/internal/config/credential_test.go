@@ -52,6 +52,10 @@ func TestLoadRequireDownstreamCredentialInvalid(t *testing.T) {
 func TestLoadNormalizesEnvironment(t *testing.T) {
 	t.Setenv(envPrefix+"OIDC_ISSUER_URL", "https://idp.example")
 	t.Setenv(envPrefix+"OIDC_AUDIENCE", "agentgate")
+	t.Setenv(envPrefix+"DATABASE_URL", "postgres://localhost:5432/test?sslmode=require")
+	t.Setenv(envPrefix+"AUDIT_SALT", "test-audit-salt-production")
+	t.Setenv(envPrefix+"CREDENTIAL_SIGNING_KEY_FILE", "/path/to/key.pem")
+	t.Setenv(envPrefix+"CREDENTIAL_AUDIENCES", "mcp-probe=probe-aud")
 	for in, want := range map[string]string{
 		"Production":   "production",
 		" PRODUCTION ": "production",

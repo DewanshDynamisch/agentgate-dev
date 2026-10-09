@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/apidocs"
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
@@ -30,9 +31,11 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/oidcverify"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
+	"github.com/Dynamisch-LLC/agentgate/internal/ratelimit"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -47,6 +50,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
 
 	logger := logging.New(cfg.LogLevel, os.Stdout)
 	logger.Info("starting agentgate",
@@ -54,6 +60,15 @@ func run() error {
 		"http_addr", cfg.HTTPAddr,
 		"authz_grpc_addr", cfg.AuthzGRPCAddr,
 	)
+
+	if cfg.AdminTokenGenerated {
+		logger.Warn("generated ephemeral admin token for development; set AGENTGATE_ADMIN_TOKEN for persistent access",
+			"admin_token", cfg.AdminToken,
+		)
+	}
+	if cfg.Environment == "production" && cfg.DBAllowInsecure && strings.Contains(cfg.DatabaseURL, "sslmode=disable") {
+		logger.Warn("insecure database connection permitted via AGENTGATE_DB_ALLOW_INSECURE=true; not recommended for production")
+	}
 
 	srv := httpserver.New(cfg.HTTPAddr, logger)
 
@@ -101,7 +116,7 @@ func run() error {
 		logger.Info("using in-memory policy and audit store")
 	}
 
-	redactor := audit.NewRedactor(os.Getenv("AGENTGATE_AUDIT_SALT"), nil)
+	redactor := audit.NewRedactor(cfg.AuditSalt, nil)
 	auditedDecisionSvc := audit.NewAuditedDecisionService(nil, auditStore, redactor)
 
 	policyMgr := policymanager.NewWithListener(store, auditedDecisionSvc)
@@ -142,6 +157,7 @@ func run() error {
 		return err
 	}
 	govHandler.SetAuthenticator(adminAuth)
+	govHandler.SetRateLimiter(ratelimit.New(cfg.AdminRateLimit, cfg.AdminRateBurst))
 	govHandler.RegisterRoutes(srv.Mux())
 	apidocs.RegisterRoutes(srv.Mux())
 	logger.Info("governance API docs available", "path", "/docs")
@@ -186,7 +202,14 @@ func run() error {
 	}
 	defer grpcListener.Close()
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(2*1024*1024),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ConnectionTimeout(5*time.Second),
+	)
 	authv3.RegisterAuthorizationServer(grpcServer, authzServer)
 
 	go func() {
