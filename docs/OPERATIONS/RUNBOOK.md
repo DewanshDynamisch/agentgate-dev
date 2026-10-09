@@ -578,9 +578,19 @@ groups:
 
 1. **D2 Single-Node Deployment Topology**:
    AgentGate v1 is architected and verified as a single-node daemon paired with PostgreSQL. Active-active distributed consensus and multi-node clustering are deferred to post-v1.
-2. **Pinned Cedar Engine Revision (O-004)**:
-   The evaluation engine uses pinned `github.com/cedar-policy/cedar-go v1.8.0`. Custom entity types and schema validation strictly adhere to this release.
+2. **Supported MCP Revision (O-004)**:
+   The implementation targets the pinned MCP revision `2026-07-28` as the protocol boundary. There is no multi-revision support. (The evaluation engine itself uses pinned `github.com/cedar-policy/cedar-go v1.8.0`).
 3. **Single Active Signing Key in JWKS**:
    AgentGate serves only the currently configured active RSA signing key in `/.well-known/jwks.json`. Seamless overlapping key retirement without traffic interruption will be added in a future release.
 4. **Docker Compose Topology Specification**:
    The production deployment contract in v1 is Docker Compose with Docker secrets and internal bridge networks. Kubernetes Helm charts and operators are planned for subsequent milestones.
+5. **Unencrypted Database Connection**:
+   The DB connection is **unencrypted** (`sslmode=disable` with `AGENTGATE_DB_ALLOW_INSECURE=true` in `deploy/prod/docker-compose.yml`); remediation: enable Postgres TLS and `sslmode=verify-full`, then remove the override.
+6. **Plain Environment Variables for Some Secrets**:
+   The DB password inside `AGENTGATE_DATABASE_URL` and Keycloak client secrets are passed as environment variables (visible via `docker inspect`), while key/cert/salt files use Docker secrets.
+7. **Test-Fixture Baseline Policy**:
+   **The default policy is the test-fixture baseline** (roles reader/admin/payer/broken) — an owner decision is required before real use.
+8. **Single Workspace Hydration**:
+   Policies are hydrated for workspace `default` only.
+9. **CI Verification**:
+   CI jobs have not run on GitHub until the branch is pushed.

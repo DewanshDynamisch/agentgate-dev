@@ -142,3 +142,17 @@ Task 25: review spec OK, approved. 0 Critical, 0 Important, 0 Minor.
 Task 25: complete (commits d43d206..3a0cf75, review clean)
 
 - **Addendum (2026-10-09)**: Fixed demo-support-desk-mcp distroless healthcheck failure by adding a CLI healthcheck command to its Go binary and modifying its docker-compose.yml check. Modified run-demo-e2e.ps1 to execute wget via agentgate container. Re-ran e2e and security gate scripts: 100% PASS.
+
+## Hardening 2026-10-09 (verification by planner; implementation by other agent)
+Verification of head 29053fe: Go/frontend/demo tests pass; live gate FAILED first from-scratch run (clean-room step 11 list_tickets=403 after restart), PASSED 17/17 second run (flaky step). Found: restart re-activates baseline v1.0.0 (LoadActivePolicies exists, zero callers); runbook O-004 mislabelled + DB-unencrypted/env-secrets undisclosed; gate runner hardcodes /work; expiry test can't separate expiry from replay; no -race run; no final whole-branch review. CI job bind-mounts /work (so CI itself likely works).
+Plan: docs/superpowers/plans/2026-10-09-v1-hardening.md (H1,H2,H3,H5,H6,H4,H7). Rulings R1-R3 recorded in the plan.
+Task H1: minor (deferred): Swallowed errors during seeding. If policyMgr.Store().GetActivePolicy(ctx, 'default') returns generic error, it is ignored.
+Task H1: ready for verification (7c0e07a)
+Task H2: minor (deferred): In finally cleanup, /policies/rollback endpoint is used, which may not exist; and Start-Sleep runs after last loop iteration.
+Task H2: ready for verification (fdc5897)
+Task H3: ready for verification (835c17e)
+
+## Website + demo pack (planned 2026-10-09)
+Spec: docs/superpowers/specs/2026-10-09-website-and-demo-pack-design.md. Plan: docs/superpowers/plans/2026-10-09-website-and-demo-pack.md (T1-T20). Starts after "hardening signed off" (T1-T2 may start earlier; they touch only new files). Branch: feature/website-and-demo-pack. Rulings P1-P9 in the plan.
+Task H5: ready for verification (50b594e)
+Task H6: ready for verification (50b594e - no commits)

@@ -13,9 +13,9 @@ AgentGate v1 Production Readiness (all 25 planned implementation and verificatio
 
 Every subsystem, security boundary, and operational requirement defined in `docs/superpowers/plans/2026-09-29-agentgate-v1-production.md` has been implemented, tested, and verified against running container topologies:
 
-- **Full CI pipeline coverage:** 7 automated jobs in `.github/workflows/ci.yml` (`go`, `demo-module-tests`, `frontend`, `images`, `g6-live-e2e`, `demo-live-e2e`, `v1-security-gate`).
+- **CI pipeline configured:** 7 automated jobs defined in `.github/workflows/ci.yml` (`go`, `demo-module-tests`, `frontend`, `images`, `g6-live-e2e`, `demo-live-e2e`, `v1-security-gate`). GitHub CI not yet run.
 - **Definitive operator runbook:** 12 verified operational runbook procedures documented in `docs/OPERATIONS/RUNBOOK.md`.
-- **Zero critical or high security defects:** Live 17-scenario security gate suite (`qa/v1security`) passing 100%.
+- **Zero critical or high security defects:** Live 17-scenario security gate suite (`qa/v1security`) passed in the Docker sandbox on 2026-10-09, run 3 times; GitHub CI not yet run.
 
 ### Checkpoint Milestones
 
@@ -29,7 +29,7 @@ Every subsystem, security boundary, and operational requirement defined in `docs
 - **G8 — Operator Visibility Complete: PASS / CLOSED** (2026-10-08). Admin UI (`frontend/app/`) fully wired to live backend APIs for Audit Logs, Tools Catalog, and Policy Lifecycle. All panels backed by real data; Vitest test suite passing (87/87 tests).
 - **G9 — Integration Breadth: PASS / CLOSED** (2026-10-09). Persistent PostgreSQL tool catalog store (`internal/toolcatalog`), runtime tool registration and risk reclassification via Admin API, and pinned MCP revision `2026-07-28` (O-004).
 - **G10 — Production Environment Readiness: PASS / CLOSED** (2026-10-09). Production Compose topology (`deploy/prod/docker-compose.yml`) with Keycloak 26 OIDC federation, mutual TLS (mTLS) upstream between agentgateway and agentgate, database privilege separation (`agentgate_app` vs `agentgate_migrator`), zero dev defaults in production mode, distroless container images, subcommands (`serve`, `migrate`, `verify-audit`, `healthcheck`), and Prometheus metrics on `:9090/metrics`.
-- **G11 — Release Candidate Security Gate: PASS / CLOSED** (2026-10-09). Automated clean-room verification (`clean-room.ps1`, 13/13 checks) and live 17-scenario security gate suite (`run-security-gate.ps1`, `qa/v1security`, 17/17 PASS). Full end-to-end audit and release candidate commit created (`chore(release): v1.0.0-rc1 status`).
+- **G11 — Release Candidate Security Gate: PASS / CLOSED** (2026-10-09). Automated clean-room verification (`clean-room.ps1`, 13/13 checks) and live 17-scenario security gate suite (`run-security-gate.ps1`, `qa/v1security`) passed in the Docker sandbox on 2026-10-09, run 3 times; GitHub CI not yet run. Full end-to-end audit and release candidate commit created (`chore(release): v1.0.0-rc1 status`).
 
 ---
 
@@ -110,7 +110,7 @@ Every claim in this document is backed by reproducible automated test suites:
 | Admin UI SPA | `npm test` & `npm run build` in `frontend/app/` | 100% PASS (87 tests) + dist build | React components, OIDC auth flow, tool catalog editor, audit viewer, Vite bundling |
 | G6 Live Enforcement | `pwsh deploy/g6/run-e2e-matrix.ps1` in sandbox | 100% PASS (12/12 DoD scenarios) | Live agentgateway v1.4.0 proxying, ext_authz gRPC, outage fail-closed, recovery |
 | Realistic Demo E2E | `pwsh deploy/demo/run-demo-e2e.ps1` in sandbox | 100% PASS (13/13 checks) | Ephemeral credential minting, inbound token secrecy, 401 direct access, catalog reclassification |
-| Production Security Gate | `pwsh deploy/prod/scripts/run-security-gate.ps1` in sandbox | 100% PASS (13 clean-room + 17 live scenarios) | Clean-room deploy, OIDC RBAC, mTLS, audit chain verification, live bypass/replay/forgery/outage attacks |
+| Production Security Gate | `pwsh deploy/prod/scripts/run-security-gate.ps1` in sandbox | 100% PASS in Docker sandbox on 2026-10-09, run 3 times; GitHub CI not yet run | Clean-room deploy, OIDC RBAC, mTLS, audit chain verification, live bypass/replay/forgery/outage attacks |
 
 ---
 
