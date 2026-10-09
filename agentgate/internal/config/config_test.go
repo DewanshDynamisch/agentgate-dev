@@ -31,6 +31,8 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadOverrides(t *testing.T) {
 	t.Setenv(envPrefix+"ENV", "production")
+	t.Setenv(envPrefix+"OIDC_ISSUER_URL", "https://idp.example")
+	t.Setenv(envPrefix+"OIDC_AUDIENCE", "agentgate")
 	t.Setenv(envPrefix+"HTTP_ADDR", ":9999")
 	t.Setenv(envPrefix+"AUTHZ_GRPC_ADDR", ":9005")
 	t.Setenv(envPrefix+"LOG_LEVEL", "debug")
@@ -97,5 +99,53 @@ func TestValidateRejectsNonPositiveShutdownTimeout(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want error for zero ShutdownTimeout")
+	}
+}
+
+func TestAdminAuthMode_DevDefaultsStatic(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AdminAuthMode != "static" || cfg.OIDCAdminRole != "agentgate-admin" {
+		t.Errorf("mode=%q role=%q", cfg.AdminAuthMode, cfg.OIDCAdminRole)
+	}
+}
+
+func TestAdminAuthMode_ProductionForcesOIDC(t *testing.T) {
+	t.Setenv(envPrefix+"ENV", "production")
+	t.Setenv(envPrefix+"ADMIN_AUTH_MODE", "static")
+	t.Setenv(envPrefix+"OIDC_ISSUER_URL", "https://idp.example/realms/ag")
+	t.Setenv(envPrefix+"OIDC_AUDIENCE", "agentgate")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AdminAuthMode != "oidc" {
+		t.Errorf("mode = %q, want oidc", cfg.AdminAuthMode)
+	}
+}
+
+func TestAdminAuthMode_ProductionMissingIssuerErrors(t *testing.T) {
+	t.Setenv(envPrefix+"ENV", "production")
+	t.Setenv(envPrefix+"OIDC_AUDIENCE", "agentgate")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for missing issuer")
+	}
+	t.Setenv(envPrefix+"OIDC_ISSUER_URL", "https://idp.example")
+	t.Setenv(envPrefix+"OIDC_AUDIENCE", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for missing audience")
+	}
+}
+
+func TestAdminAuthMode_InvalidAndDevOIDC(t *testing.T) {
+	t.Setenv(envPrefix+"ADMIN_AUTH_MODE", "bogus")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for invalid mode")
+	}
+	t.Setenv(envPrefix+"ADMIN_AUTH_MODE", "oidc")
+	if _, err := Load(); err == nil {
+		t.Fatal("oidc in dev without issuer must error")
 	}
 }

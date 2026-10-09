@@ -26,6 +26,7 @@ type Handler struct {
 	toolCatalog    ToolCatalogService
 	catalogMu      sync.Mutex
 	adminToken     string
+	auth           AdminAuthenticator
 }
 
 // NewHandler constructs a new Handler.
@@ -51,10 +52,21 @@ func NewHandlerWithCatalog(manager *policymanager.Manager, adminToken string, go
 	return h
 }
 
+// SetAuthenticator replaces the default static-token authenticator (e.g. with
+// OIDC). It must be called before RegisterRoutes.
+func (h *Handler) SetAuthenticator(a AdminAuthenticator) { h.auth = a }
+
+func (h *Handler) authenticator() AdminAuthenticator {
+	if h.auth != nil {
+		return h.auth
+	}
+	return NewStaticTokenAuthenticator(h.adminToken)
+}
+
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	protect := func(fn http.HandlerFunc) http.HandlerFunc {
-		return AdminAuthMiddleware(h.adminToken, fn)
+		return AdminAuthMiddlewareWith(h.authenticator(), fn)
 	}
 
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/validate", protect(h.handleValidate))

@@ -27,6 +27,7 @@ const (
 	defaultLogLevel        = "info"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultAdminToken      = "agentgate-admin-secret-dev"
+	defaultOIDCAdminRole   = "agentgate-admin"
 )
 
 // Config holds AgentGate's startup configuration.
@@ -54,6 +55,15 @@ type Config struct {
 
 	// AdminToken is the secret required for authenticated policy governance mutations.
 	AdminToken string
+
+	// AdminAuthMode is "static" (shared token) or "oidc". Forced to "oidc" in production.
+	AdminAuthMode string
+	// OIDCIssuerURL, OIDCAudience, OIDCAdminRole and OIDCRoleClaimPath configure
+	// OIDC admin authentication.
+	OIDCIssuerURL     string
+	OIDCAudience      string
+	OIDCAdminRole     string
+	OIDCRoleClaimPath string
 
 	// DatabaseURL is the PostgreSQL connection string for persistent policy storage.
 	// If empty, AgentGate runs with an in-memory policy store.
@@ -110,6 +120,18 @@ func Load() (Config, error) {
 	cfg.ShutdownTimeout = timeout
 
 	cfg.AdminToken = getEnv(envPrefix+"ADMIN_TOKEN", defaultAdminToken)
+	cfg.OIDCIssuerURL = strings.TrimSpace(getEnv(envPrefix+"OIDC_ISSUER_URL", ""))
+	cfg.OIDCAudience = strings.TrimSpace(getEnv(envPrefix+"OIDC_AUDIENCE", ""))
+	cfg.OIDCAdminRole = strings.TrimSpace(getEnv(envPrefix+"OIDC_ADMIN_ROLE", defaultOIDCAdminRole))
+	cfg.OIDCRoleClaimPath = strings.TrimSpace(getEnv(envPrefix+"OIDC_ROLE_CLAIM_PATH", ""))
+	mode := strings.ToLower(strings.TrimSpace(getEnv(envPrefix+"ADMIN_AUTH_MODE", "static")))
+	if mode != "static" && mode != "oidc" {
+		return Config{}, fmt.Errorf("config: invalid %sADMIN_AUTH_MODE %q (want oidc|static)", envPrefix, mode)
+	}
+	if cfg.Environment == "production" {
+		mode = "oidc" // production never uses the shared static admin token
+	}
+	cfg.AdminAuthMode = mode
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
 	cfg.ToolBootstrapFile = strings.TrimSpace(getEnv(envPrefix+"TOOL_BOOTSTRAP_FILE", ""))
 
@@ -158,6 +180,17 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.AdminToken) == "" {
 		return fmt.Errorf("config: %sADMIN_TOKEN must not be empty", envPrefix)
+	}
+	if c.AdminAuthMode == "oidc" {
+		if c.OIDCIssuerURL == "" {
+			return fmt.Errorf("config: %sOIDC_ISSUER_URL is required when admin auth mode is oidc", envPrefix)
+		}
+		if c.OIDCAudience == "" {
+			return fmt.Errorf("config: %sOIDC_AUDIENCE is required when admin auth mode is oidc", envPrefix)
+		}
+		if c.OIDCAdminRole == "" {
+			return fmt.Errorf("config: %sOIDC_ADMIN_ROLE must not be empty", envPrefix)
+		}
 	}
 	return nil
 }

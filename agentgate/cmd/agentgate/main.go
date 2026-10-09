@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/apidocs"
@@ -26,6 +27,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/httpserver"
 	"github.com/Dynamisch-LLC/agentgate/internal/identity"
 	"github.com/Dynamisch-LLC/agentgate/internal/logging"
+	"github.com/Dynamisch-LLC/agentgate/internal/oidcverify"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
@@ -135,6 +137,11 @@ func run() error {
 		Catalog:  toolCatalog,
 		Listener: auditedDecisionSvc,
 	})
+	adminAuth, err := buildAdminAuthenticator(context.Background(), cfg, logger)
+	if err != nil {
+		return err
+	}
+	govHandler.SetAuthenticator(adminAuth)
 	govHandler.RegisterRoutes(srv.Mux())
 	apidocs.RegisterRoutes(srv.Mux())
 	logger.Info("governance API docs available", "path", "/docs")
@@ -259,4 +266,28 @@ func loadSigningKey(cfg config.Config, logger *slog.Logger) (*rsa.PrivateKey, er
 		return nil, fmt.Errorf("generate ephemeral credential key: %w", err)
 	}
 	return key, nil
+}
+
+// buildAdminAuthenticator selects the admin API authenticator. In oidc mode the
+// verifier is built eagerly so a failed IdP discovery stops startup.
+func buildAdminAuthenticator(ctx context.Context, cfg config.Config, logger *slog.Logger) (govapi.AdminAuthenticator, error) {
+	if cfg.AdminAuthMode != "oidc" {
+		logger.Warn("admin API uses the static shared admin token; not permitted in production", "environment", cfg.Environment)
+		return govapi.NewStaticTokenAuthenticator(cfg.AdminToken), nil
+	}
+	vcfg := oidcverify.Config{
+		IssuerURL:     cfg.OIDCIssuerURL,
+		Audience:      cfg.OIDCAudience,
+		RoleClaimPath: cfg.OIDCRoleClaimPath,
+	}
+	if cfg.Environment == "development" && strings.HasPrefix(strings.ToLower(cfg.OIDCIssuerURL), "http://") {
+		vcfg.AllowInsecureHTTP = true
+		logger.Warn("OIDC issuer uses plain http; allowed in development only", "issuer", cfg.OIDCIssuerURL)
+	}
+	v, err := oidcverify.New(ctx, vcfg)
+	if err != nil {
+		return nil, fmt.Errorf("init OIDC admin verifier: %w", err)
+	}
+	logger.Info("admin API authentication: OIDC", "issuer", cfg.OIDCIssuerURL, "role", cfg.OIDCAdminRole)
+	return govapi.NewOIDCAuthenticator(v, cfg.OIDCAdminRole), nil
 }

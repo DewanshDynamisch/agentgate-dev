@@ -10,6 +10,8 @@ import (
 
 func TestLoadSigningKeyProductionWithoutFileFails(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	t.Setenv("AGENTGATE_OIDC_ISSUER_URL", "https://idp.example")
+	t.Setenv("AGENTGATE_OIDC_AUDIENCE", "agentgate")
 	for _, env := range []string{"production", "Production", " PRODUCTION ", "prod"} {
 		t.Setenv("AGENTGATE_ENV", env)
 		cfg, err := config.Load()

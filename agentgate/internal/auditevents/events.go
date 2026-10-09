@@ -38,6 +38,20 @@ type MutationEvent struct {
 	OperatorID      string
 }
 
+type actorCtxKey struct{}
+
+// WithActor returns a context carrying the authenticated actor identity for
+// mutation attribution.
+func WithActor(ctx context.Context, actor string) context.Context {
+	return context.WithValue(ctx, actorCtxKey{}, actor)
+}
+
+// ActorFromContext returns the actor set by WithActor, or "" if none.
+func ActorFromContext(ctx context.Context) string {
+	a, _ := ctx.Value(actorCtxKey{}).(string)
+	return a
+}
+
 // MutationListener receives mutation events. G4 provides a no-op and a recording
 // implementation; G5 will provide the durable audit listener.
 type MutationListener interface {

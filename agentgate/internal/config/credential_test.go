@@ -50,6 +50,8 @@ func TestLoadRequireDownstreamCredentialInvalid(t *testing.T) {
 }
 
 func TestLoadNormalizesEnvironment(t *testing.T) {
+	t.Setenv(envPrefix+"OIDC_ISSUER_URL", "https://idp.example")
+	t.Setenv(envPrefix+"OIDC_AUDIENCE", "agentgate")
 	for in, want := range map[string]string{
 		"Production":   "production",
 		" PRODUCTION ": "production",

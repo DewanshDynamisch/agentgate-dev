@@ -177,7 +177,7 @@ func (h *Handler) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		Arguments:   args,
 		Description: req.Description,
 		UpdatedAt:   time.Now().UTC(),
-		UpdatedBy:   catalogOperatorID,
+		UpdatedBy:   actorFromContext(r.Context()),
 	}
 	if err := def.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_TOOL", err.Error())
@@ -272,6 +272,18 @@ func (h *Handler) emitToolMutation(ctx context.Context, action auditevents.Mutat
 		NewVersion:    backendID + "/" + toolName,
 		CorrelationID: "tool-" + hex.EncodeToString(corr[:]),
 		Timestamp:     time.Now().UTC(),
-		OperatorID:    catalogOperatorID,
+		OperatorID:    actorFromContext(ctx),
 	})
+}
+
+// actorFromContext returns the authenticated actor, falling back to the
+// legacy catalog operator label only if no principal is present.
+func actorFromContext(ctx context.Context) string {
+	if p, ok := PrincipalFromContext(ctx); ok && p.ActorName() != "" {
+		return p.ActorName()
+	}
+	if a := auditevents.ActorFromContext(ctx); a != "" {
+		return a
+	}
+	return catalogOperatorID
 }
