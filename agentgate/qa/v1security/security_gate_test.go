@@ -202,6 +202,15 @@ func TestV1_06_DirectBackendAccessWithoutCredential(t *testing.T) {
 		conn.Close()
 		t.Fatalf("SECURITY VIOLATION: backend port is published on %s!", cfg.HostBackendAddr)
 	}
+
+	// Directly inspect container port bindings to ensure port 9200 is not published to host
+	if path, err := exec.LookPath("docker"); err == nil {
+		cmd := exec.Command(path, "port", "prod-support-desk-mcp", "9200")
+		out, err := cmd.CombinedOutput()
+		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+			t.Fatalf("SECURITY VIOLATION: docker port reports port 9200 published to host: %s", string(out))
+		}
+	}
 }
 
 // TestV1_07_IdentitySpoofing verifies that client headers like x-agent-id are ignored,
@@ -324,10 +333,24 @@ func TestV1_10_UnknownTool(t *testing.T) {
 	}
 
 	events, err := cfg.GetAuditEvents(t, adminToken, "default")
-	if err == nil && len(events) > 0 {
-		if events[0].ToolName == "nonexistent_tool_99999" && events[0].Reason != "unknown_tool" {
-			t.Fatalf("expected audit reason unknown_tool, got %s", events[0].Reason)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("failed to retrieve audit events: %v", err)
+	}
+	var unknownEvent *AuditEventView
+	for i := range events {
+		if events[i].ToolName == "nonexistent_tool_99999" {
+			unknownEvent = &events[i]
+			break
 		}
+	}
+	if unknownEvent == nil {
+		t.Fatalf("audit event for unknown tool not found")
+	}
+	if unknownEvent.Reason != "unknown_tool" {
+		t.Fatalf("expected audit reason unknown_tool, got %s", unknownEvent.Reason)
+	}
+	if !strings.EqualFold(unknownEvent.Decision, "deny") {
+		t.Fatalf("expected deny decision in audit log, got %s", unknownEvent.Decision)
 	}
 }
 
@@ -591,7 +614,7 @@ func TestV1_17_CatalogRace(t *testing.T) {
 		if e.ToolName != "update_ticket_status" || e.EventType == "mutation" {
 			continue
 		}
-		if e.Decision == "allow" {
+		if strings.EqualFold(e.Decision, "allow") {
 			allowCount++
 			if e.ToolRisk == "destructive" {
 				t.Fatalf("CRITICAL SECURITY DEFECT: ALLOW decision recorded with tool_risk == 'destructive'!")
@@ -599,10 +622,22 @@ func TestV1_17_CatalogRace(t *testing.T) {
 			if e.ToolRisk != "write" {
 				t.Fatalf("ALLOW decision recorded with unexpected tool_risk: %s", e.ToolRisk)
 			}
-		} else if e.Decision == "deny" {
+		} else if strings.EqualFold(e.Decision, "deny") {
 			denyCount++
+			if e.ToolRisk != "destructive" && !strings.Contains(e.Reason, "policy_deny") && !strings.Contains(e.Reason, "no_matching_policy") {
+				t.Fatalf("DENY decision recorded with unexpected tool_risk/reason: risk=%s reason=%s", e.ToolRisk, e.Reason)
+			}
 		}
 	}
 
 	t.Logf("TestV1_17_CatalogRace completed: %d ALLOW, %d DENY decisions audited", allowCount, denyCount)
+	if allowCount == 0 {
+		t.Fatalf("expected at least one ALLOW decision during catalog race, got 0")
+	}
+	if denyCount == 0 {
+		t.Fatalf("expected at least one DENY decision during catalog race, got 0")
+	}
+	if allowCount+denyCount < 100 {
+		t.Fatalf("expected at least 100 decisions during catalog race, got %d (%d allow, %d deny)", allowCount+denyCount, allowCount, denyCount)
+	}
 }

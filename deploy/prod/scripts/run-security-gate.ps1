@@ -69,6 +69,7 @@ Write-Host "`n--> Step 3: Running 17 v1 live security gate scenarios" -Foregroun
 $testArgs = @(
     "run", "--rm",
     "--network", "agentgate-prod",
+    "--add-host", "host.docker.internal:host-gateway",
     "-v", "/work:/work",
     "-v", "/root/go/pkg/mod:/go/pkg/mod",
     "-v", "/var/run/docker.sock:/var/run/docker.sock",
@@ -84,7 +85,7 @@ $testArgs = @(
     "-e", "AGENTGATE_V1_OPS_CLI_PASSWORD=$adminPw",
     "-e", "AGENTGATE_V1_DATABASE_URL=$dbUrl",
     "-e", "AGENTGATE_V1_CONTAINER_NAME=prod-agentgate",
-    "-e", "AGENTGATE_V1_HOST_BACKEND_ADDR=localhost:9200",
+    "-e", "AGENTGATE_V1_HOST_BACKEND_ADDR=host.docker.internal:9200",
     "golang:1.25-alpine",
     "go", "test", "-v", "-timeout", "180s", "./qa/v1security/..."
 )

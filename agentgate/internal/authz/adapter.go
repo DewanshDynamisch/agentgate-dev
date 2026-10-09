@@ -236,15 +236,31 @@ func (a *Adapter) Adapt(ctx context.Context, checkReq *authv3.CheckRequest) (dec
 	govRecord := registry.Lookup(toolID, liveFP)
 	if !govRecord.Known {
 		return decision.Request{}, &AdapterError{
-			ReasonCode: decision.ReasonUnknownTool,
-			Message:    fmt.Sprintf("tool %s is not registered in governance catalog", toolID),
+			ReasonCode:  decision.ReasonUnknownTool,
+			Message:     fmt.Sprintf("tool %s is not registered in governance catalog", toolID),
+			ToolName:    toolName,
+			BackendID:   backendID,
+			WorkspaceID: workspaceID,
+			Identity: decision.Identity{
+				AgentID:    mappedIdentity.AgentID,
+				Roles:      mappedIdentity.Roles,
+				OnBehalfOf: mappedIdentity.OnBehalfOf,
+			},
 		}
 	}
 
 	if govRecord.DriftStatus == toolregistry.DriftDetected {
 		return decision.Request{}, &AdapterError{
-			ReasonCode: decision.ReasonUnknownTool,
-			Message:    fmt.Sprintf("tool %s schema drift detected", toolID),
+			ReasonCode:  decision.ReasonUnknownTool,
+			Message:     fmt.Sprintf("tool %s schema drift detected", toolID),
+			ToolName:    toolName,
+			BackendID:   backendID,
+			WorkspaceID: workspaceID,
+			Identity: decision.Identity{
+				AgentID:    mappedIdentity.AgentID,
+				Roles:      mappedIdentity.Roles,
+				OnBehalfOf: mappedIdentity.OnBehalfOf,
+			},
 		}
 	}
 

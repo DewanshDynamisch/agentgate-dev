@@ -114,12 +114,42 @@ func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (resp *aut
 		}
 
 		if s.decisionSvc != nil {
+			toolName := aerr.ToolName
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			backendID := aerr.BackendID
+			if backendID == "" && s.adapter != nil {
+				backendID = s.adapter.cfg.DefaultBackendID
+			}
+			if backendID == "" {
+				backendID = "default"
+			}
+			wsID := aerr.WorkspaceID
+			if wsID == "" && s.adapter != nil {
+				wsID = s.adapter.cfg.DefaultWorkspaceID
+			}
+			if wsID == "" {
+				wsID = "default"
+			}
+			agentID := "unauthenticated"
+			roles := []string{"unauthenticated"}
+			if aerr.Identity.AgentID != "" {
+				agentID = aerr.Identity.AgentID
+				roles = aerr.Identity.Roles
+			}
+
 			fallbackReq := decision.Request{
 				ExecutionID: execID,
-				WorkspaceID: s.adapter.cfg.DefaultWorkspaceID,
+				WorkspaceID: wsID,
 				Identity: decision.Identity{
-					AgentID: "unauthenticated",
-					Roles:   []string{"unauthenticated"},
+					AgentID:    agentID,
+					Roles:      roles,
+					OnBehalfOf: aerr.Identity.OnBehalfOf,
+				},
+				Tool: decision.ToolRef{
+					BackendID: backendID,
+					Name:      toolName,
 				},
 				Classification: decision.ToolClassification{
 					Known: false,

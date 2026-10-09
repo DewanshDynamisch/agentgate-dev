@@ -54,9 +54,13 @@ type AdapterConfig struct {
 
 // AdapterError describes why an ext_authz check cannot be translated into a valid decision.Request.
 type AdapterError struct {
-	ReasonCode decision.ReasonCode
-	Message    string
-	Err        error
+	ReasonCode  decision.ReasonCode
+	Message     string
+	Err         error
+	ToolName    string
+	BackendID   string
+	WorkspaceID string
+	Identity    decision.Identity
 }
 
 func (e *AdapterError) Error() string {

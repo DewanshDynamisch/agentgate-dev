@@ -410,24 +410,42 @@ func (cfg *TestConfig) SetToolRisk(t *testing.T, token, backendID, toolName, ris
 	return nil
 }
 
-// GetAuditEvents fetches audit events from Admin API.
+// GetAuditEvents fetches audit events from Admin API, paging backwards to gather up to 500 records.
 func (cfg *TestConfig) GetAuditEvents(t *testing.T, token, workspaceID string) ([]AuditEventView, error) {
 	t.Helper()
-	status, body, err := cfg.CallAdminAPI(t, token, http.MethodGet, fmt.Sprintf("/api/v1/workspaces/%s/audit-events?limit=100", workspaceID), nil)
-	if err != nil {
-		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("audit events returned status %d: %s", status, string(body))
-	}
+	var allEvents []AuditEventView
+	var beforeSeq *int64
 
-	var resp struct {
-		Events []AuditEventView `json:"events"`
+	for len(allEvents) < 500 {
+		path := fmt.Sprintf("/api/v1/workspaces/%s/audit-events?limit=100", workspaceID)
+		if beforeSeq != nil {
+			path = fmt.Sprintf("/api/v1/workspaces/%s/audit-events?limit=100&before_sequence=%d", workspaceID, *beforeSeq)
+		}
+		status, body, err := cfg.CallAdminAPI(t, token, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("audit events returned status %d: %s", status, string(body))
+		}
+
+		var resp struct {
+			Events             []AuditEventView `json:"events"`
+			NextBeforeSequence *int64           `json:"next_before_sequence"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp.Events) == 0 {
+			break
+		}
+		allEvents = append(allEvents, resp.Events...)
+		if resp.NextBeforeSequence == nil {
+			break
+		}
+		beforeSeq = resp.NextBeforeSequence
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Events, nil
+	return allEvents, nil
 }
 
 // StopAgentGate stops the agentgate container.
