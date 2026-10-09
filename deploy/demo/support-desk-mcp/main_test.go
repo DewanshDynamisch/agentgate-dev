@@ -238,3 +238,68 @@ func TestUnknownTool_ReturnsError(t *testing.T) {
 		t.Fatalf("expected an error for an unknown tool")
 	}
 }
+
+func TestLastCredential_DisabledAndEnabled(t *testing.T) {
+	// Disabled case (default)
+	sDisabled := NewServer()
+	hDisabled := sDisabled.Handler()
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest("GET", "/_demo/last-credential", nil)
+	hDisabled.ServeHTTP(w1, r1)
+	if w1.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when ExposeLastCredential is false, got %d", w1.Code)
+	}
+
+	// Enabled case
+	sEnabled := NewServerWithConfig(ServerConfig{ExposeLastCredential: true})
+	hEnabled := sEnabled.Handler()
+
+	// Initial check before any call
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest("GET", "/_demo/last-credential", nil)
+	hEnabled.ServeHTTP(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 when ExposeLastCredential is true, got %d", w2.Code)
+	}
+	var res2 map[string]string
+	if err := json.Unmarshal(w2.Body.Bytes(), &res2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if res2["credential"] != "" {
+		t.Fatalf("expected empty credential initially, got %q", res2["credential"])
+	}
+
+	// Tool call with Authorization header
+	rawToken := "Bearer test-credential-jwt-value"
+	callTool(hEnabled, rawToken, "list_tickets", "{}")
+
+	w3 := httptest.NewRecorder()
+	r3 := httptest.NewRequest("GET", "/_demo/last-credential", nil)
+	hEnabled.ServeHTTP(w3, r3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200 after tool call, got %d", w3.Code)
+	}
+	var res3 map[string]string
+	if err := json.Unmarshal(w3.Body.Bytes(), &res3); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if res3["credential"] != rawToken {
+		t.Fatalf("expected %q, got %q", rawToken, res3["credential"])
+	}
+
+	// Reset clears last credential
+	wReset := httptest.NewRecorder()
+	rReset := httptest.NewRequest("POST", "/_demo/reset", nil)
+	hEnabled.ServeHTTP(wReset, rReset)
+
+	w4 := httptest.NewRecorder()
+	r4 := httptest.NewRequest("GET", "/_demo/last-credential", nil)
+	hEnabled.ServeHTTP(w4, r4)
+	var res4 map[string]string
+	if err := json.Unmarshal(w4.Body.Bytes(), &res4); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if res4["credential"] != "" {
+		t.Fatalf("expected empty credential after reset, got %q", res4["credential"])
+	}
+}

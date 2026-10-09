@@ -3,6 +3,7 @@
   "realm": "agentgate",
   "enabled": true,
   "displayName": "AgentGate Realm",
+  "accessTokenLifespan": 300,
   "roles": {
     "realm": [
       {
@@ -131,6 +132,17 @@
           }
         },
         {
+          "name": "audience-agentgate-admin-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-admin-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
           "name": "realm-roles-mapper",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-realm-role-mapper",
@@ -163,6 +175,17 @@
           "consentRequired": false,
           "config": {
             "included.custom.audience": "agentgate-gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience-agentgate-admin-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "agentgate-admin-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }

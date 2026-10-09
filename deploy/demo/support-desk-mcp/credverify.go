@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	clockSkew          = 30 * time.Second
+	clockSkew          = 10 * time.Second
 	maxCredLifetimeSec = 300
 	jwksRefreshMin     = 30 * time.Second
 	jwksHTTPTimeout    = 5 * time.Second

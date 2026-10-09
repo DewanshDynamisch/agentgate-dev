@@ -56,15 +56,17 @@ type InvocationRecord struct {
 
 // ServerConfig controls credential enforcement on tools/call.
 type ServerConfig struct {
-	RequireCredential bool
-	Verifier          *Verifier
+	RequireCredential     bool
+	Verifier              *Verifier
+	ExposeLastCredential bool
 }
 
 type Server struct {
-	mu          sync.Mutex
-	tickets     map[string]*Ticket
-	invocations []InvocationRecord
-	cfg         ServerConfig
+	mu             sync.Mutex
+	tickets        map[string]*Ticket
+	invocations    []InvocationRecord
+	lastCredential string
+	cfg            ServerConfig
 }
 
 // NewServer returns a server that does not require credentials. Test use only;
@@ -97,6 +99,7 @@ func (s *Server) reset() {
 	defer s.mu.Unlock()
 	s.seed()
 	s.invocations = nil
+	s.lastCredential = ""
 }
 
 func (s *Server) recordInvocation(rec InvocationRecord) {
@@ -197,6 +200,24 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("reset"))
 	})
 
+	mux.HandleFunc("/_demo/last-credential", func(w http.ResponseWriter, r *http.Request) {
+		if !s.cfg.ExposeLastCredential {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.mu.Lock()
+		cred := s.lastCredential
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"credential": cred,
+		})
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -254,6 +275,12 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleToolCall(ctx context.Context, w http.ResponseWriter, req jsonrpcRequest, rawBody []byte, headers map[string]string, authorization string) {
+	if s.cfg.ExposeLastCredential {
+		s.mu.Lock()
+		s.lastCredential = authorization
+		s.mu.Unlock()
+	}
+
 	var callParams struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -362,7 +389,14 @@ func configFromEnv() ServerConfig {
 	if v := strings.ToLower(os.Getenv("DEMO_MCP_REQUIRE_CREDENTIAL")); v == "false" || v == "0" {
 		require = false
 	}
-	cfg := ServerConfig{RequireCredential: require}
+	exposeCred := false
+	if v := strings.ToLower(os.Getenv("DEMO_MCP_EXPOSE_LAST_CREDENTIAL_FOR_TESTS")); v == "true" || v == "1" {
+		exposeCred = true
+	}
+	cfg := ServerConfig{
+		RequireCredential:     require,
+		ExposeLastCredential: exposeCred,
+	}
 	if url := os.Getenv("DEMO_MCP_JWKS_URL"); url != "" {
 		cfg.Verifier = NewVerifier(url,
 			envOr("DEMO_MCP_CRED_ISSUER", "agentgate"),
