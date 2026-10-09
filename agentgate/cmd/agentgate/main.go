@@ -485,11 +485,9 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer, deps
 	auditedDecisionSvc.SetEvaluator(govIntegration)
 
 	// Seed default workspace baseline policy if none active
-	if _, err := policyMgr.GetActiveEngine("default"); err != nil {
-		if _, err := policyMgr.CreateCandidateWithVersion(ctx, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy"); err == nil {
-			_, _ = policyMgr.Activate(ctx, "default", "v1.0.0")
-			logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
-		}
+	if err := bootstrapDefaultPolicy(ctx, policyMgr, logger); err != nil {
+		fmt.Fprintf(stderr, "bootstrap default policy: %v\n", err)
+		return 1
 	}
 
 	toolCatalog, err := loadToolCatalog(ctx, cfg, toolStore, logger)
@@ -723,4 +721,32 @@ func buildAdminAuthenticator(ctx context.Context, cfg config.Config, logger *slo
 	}
 	logger.Info("admin API authentication: OIDC", "issuer", cfg.OIDCIssuerURL, "role", cfg.OIDCAdminRole)
 	return govapi.NewOIDCAuthenticator(v, cfg.OIDCAdminRole), nil
+}
+
+func bootstrapDefaultPolicy(ctx context.Context, policyMgr *policymanager.Manager, logger *slog.Logger) error {
+	// 1. Load active policies from store
+	if err := policyMgr.LoadActivePolicies(ctx, []string{"default"}); err != nil {
+		return fmt.Errorf("load active policy from store: %w", err)
+	}
+
+	if ver, _, err := policyMgr.GetActiveProvenance("default"); err == nil {
+		logger.Info("loaded active policy from store", "workspace", "default", "version", ver)
+		return nil
+	}
+
+	// 2. If no active engine loaded, and store has no active policy, seed baseline
+	// Check if store has active policy for default
+	if _, err := policyMgr.Store().GetActivePolicy(ctx, "default"); errors.Is(err, policystore.ErrNoActivePolicy) {
+		if _, err := policyMgr.CreateCandidateWithVersion(ctx, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy"); err == nil {
+			if _, err := policyMgr.Activate(ctx, "default", "v1.0.0"); err == nil {
+				logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
+			}
+		} else if errors.Is(err, policystore.ErrAlreadyExists) {
+			// If it already existed but wasn't active, just activate it
+			if _, err := policyMgr.Activate(ctx, "default", "v1.0.0"); err == nil {
+				logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
+			}
+		}
+	}
+	return nil
 }
