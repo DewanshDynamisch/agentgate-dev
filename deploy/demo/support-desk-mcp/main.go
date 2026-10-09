@@ -412,6 +412,22 @@ func writeJSON(w http.ResponseWriter, resp jsonrpcResponse) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		port := os.Getenv("DEMO_MCP_PORT")
+		if port == "" {
+			port = "9200"
+		}
+		resp, err := http.Get("http://127.0.0.1:" + port + "/healthz")
+		if err != nil {
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	port := os.Getenv("DEMO_MCP_PORT")
 	if port == "" {
 		port = "9200"
