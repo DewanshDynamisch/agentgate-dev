@@ -35,3 +35,9 @@ func TestLoadSigningKeyDevelopmentEphemeral(t *testing.T) {
 		t.Fatalf("key=%v err=%v", key, err)
 	}
 }
+
+func TestVersionDefault(t *testing.T) {
+	if version != "dev" {
+		t.Errorf("version = %q, want dev", version)
+	}
+}

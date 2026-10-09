@@ -11,6 +11,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/auditevents"
 	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
+	"github.com/Dynamisch-LLC/agentgate/internal/metrics"
 )
 
 // DecisionEvaluator evaluates a decision request against the active policy of a workspace.
@@ -27,11 +28,12 @@ type ProvenanceProvider interface {
 // ensuring strict redaction, deterministic canonicalization, cryptographic hash chaining,
 // and durable audit logging before an ALLOW decision can ever be returned to the client (O-002).
 type AuditedDecisionService struct {
-	evaluator DecisionEvaluator
-	store     Store
-	redactor  *Redactor
-	issuer    credential.Issuer
-	mu        sync.Mutex
+	evaluator      DecisionEvaluator
+	store          Store
+	redactor       *Redactor
+	issuer         credential.Issuer
+	appendFailures *metrics.Counter
+	mu             sync.Mutex
 }
 
 // NewAuditedDecisionService constructs an AuditedDecisionService wrapping an evaluator and audit store.
@@ -63,6 +65,13 @@ func (s *AuditedDecisionService) SetIssuer(issuer credential.Issuer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.issuer = issuer
+}
+
+// SetMetrics sets the counter for audit append failures.
+func (s *AuditedDecisionService) SetMetrics(counter *metrics.Counter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendFailures = counter
 }
 
 // Evaluate evaluates the request and durably persists the audit record, discarding any issued credential.
@@ -196,6 +205,9 @@ func (s *AuditedDecisionService) EvaluateWithCredential(ctx context.Context, req
 	// 4. Durably persist
 	_, appendErr := s.store.AppendDecision(ctx, record)
 	if appendErr != nil {
+		if s.appendFailures != nil {
+			s.appendFailures.Inc()
+		}
 		// CRITICAL INVARIANT (O-002): An ALLOW decision must NEVER be returned
 		// without confirmed durable audit write. If the audit write fails, fail closed!
 		if res.Decision == decision.Allow {
@@ -245,5 +257,9 @@ func (s *AuditedDecisionService) OnMutation(ctx context.Context, event auditeven
 		record.RowHash = ComputeRowHash(prevHash, canonical)
 	}
 
-	_, _ = s.store.AppendDecision(ctx, record)
+	if _, err := s.store.AppendDecision(ctx, record); err != nil {
+		if s.appendFailures != nil {
+			s.appendFailures.Inc()
+		}
+	}
 }

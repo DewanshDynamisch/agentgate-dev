@@ -22,6 +22,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AuthzGRPCAddr != defaultAuthzGRPCAddr {
 		t.Errorf("AuthzGRPCAddr = %q, want %q", cfg.AuthzGRPCAddr, defaultAuthzGRPCAddr)
 	}
+	if cfg.MetricsAddr != defaultMetricsAddr {
+		t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, defaultMetricsAddr)
+	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want %v", cfg.LogLevel, slog.LevelInfo)
 	}
@@ -40,6 +43,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv(envPrefix+"CREDENTIAL_AUDIENCES", "mcp-probe=probe-aud")
 	t.Setenv(envPrefix+"HTTP_ADDR", ":9999")
 	t.Setenv(envPrefix+"AUTHZ_GRPC_ADDR", ":9005")
+	t.Setenv(envPrefix+"METRICS_ADDR", ":9095")
 	t.Setenv(envPrefix+"LOG_LEVEL", "debug")
 	t.Setenv(envPrefix+"SHUTDOWN_TIMEOUT", "2s")
 
@@ -56,6 +60,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.AuthzGRPCAddr != ":9005" {
 		t.Errorf("AuthzGRPCAddr = %q, want %q", cfg.AuthzGRPCAddr, ":9005")
+	}
+	if cfg.MetricsAddr != ":9095" {
+		t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, ":9095")
 	}
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v, want %v", cfg.LogLevel, slog.LevelDebug)
@@ -111,11 +118,29 @@ func TestValidateRejectsNonPositiveShutdownTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsEmptyMetricsAddr(t *testing.T) {
+	cfg := Config{
+		Environment:     defaultEnvironment,
+		HTTPAddr:        defaultHTTPAddr,
+		AuthzGRPCAddr:   defaultAuthzGRPCAddr,
+		MetricsAddr:     "   ",
+		LogLevel:        slog.LevelInfo,
+		ShutdownTimeout: defaultShutdownTimeout,
+		AdminRateLimit:  20,
+		AdminRateBurst:  40,
+	}
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "METRICS_ADDR must not be empty") {
+		t.Fatalf("Validate() error = %v, want error for empty MetricsAddr", err)
+	}
+}
+
 func TestValidateRejectsNonPositiveRateLimits(t *testing.T) {
 	cfg := Config{
 		Environment:     defaultEnvironment,
 		HTTPAddr:        defaultHTTPAddr,
 		AuthzGRPCAddr:   defaultAuthzGRPCAddr,
+		MetricsAddr:     defaultMetricsAddr,
 		ShutdownTimeout: defaultShutdownTimeout,
 		AdminRateLimit:  0,
 		AdminRateBurst:  -1,
@@ -236,6 +261,7 @@ func TestValidate_ProductionMissingEverythingReportsAll(t *testing.T) {
 		Environment:              "production",
 		HTTPAddr:                 ":8090",
 		AuthzGRPCAddr:            ":9001",
+		MetricsAddr:              ":9090",
 		ShutdownTimeout:          10 * time.Second,
 		AdminAuthMode:            "static",
 		AdminToken:               "dev-admin-token",
@@ -286,6 +312,7 @@ func TestValidate_ProductionAuditSaltDevFixtureRejection(t *testing.T) {
 		Environment:              "production",
 		HTTPAddr:                 ":8090",
 		AuthzGRPCAddr:            ":9001",
+		MetricsAddr:              ":9090",
 		ShutdownTimeout:          10 * time.Second,
 		AdminRateLimit:           20,
 		AdminRateBurst:           40,
@@ -318,6 +345,7 @@ func TestValidate_ProductionDatabaseURLSSLModeDisable(t *testing.T) {
 		Environment:              "production",
 		HTTPAddr:                 ":8090",
 		AuthzGRPCAddr:            ":9001",
+		MetricsAddr:              ":9090",
 		ShutdownTimeout:          10 * time.Second,
 		AdminRateLimit:           20,
 		AdminRateBurst:           40,
@@ -357,6 +385,7 @@ func TestValidate_DevConfigPasses(t *testing.T) {
 		Environment:     "development",
 		HTTPAddr:        ":8090",
 		AuthzGRPCAddr:   ":9001",
+		MetricsAddr:     ":9090",
 		ShutdownTimeout: 10 * time.Second,
 		AdminRateLimit:  20,
 		AdminRateBurst:  40,
@@ -396,6 +425,7 @@ func TestValidate_ProductionRequiresTLSFields(t *testing.T) {
 			Environment:              "production",
 			HTTPAddr:                 ":8090",
 			AuthzGRPCAddr:            ":9001",
+			MetricsAddr:              ":9090",
 			ShutdownTimeout:          10 * time.Second,
 			AdminRateLimit:           20,
 			AdminRateBurst:           40,
@@ -475,6 +505,7 @@ func TestValidate_PartialTLSConfigRejection(t *testing.T) {
 		Environment:     "development",
 		HTTPAddr:        ":8090",
 		AuthzGRPCAddr:   ":9001",
+		MetricsAddr:     ":9090",
 		ShutdownTimeout: 10 * time.Second,
 		AdminRateLimit:  20,
 		AdminRateBurst:  40,
@@ -490,6 +521,7 @@ func TestValidate_PartialTLSConfigRejection(t *testing.T) {
 		Environment:     "development",
 		HTTPAddr:        ":8090",
 		AuthzGRPCAddr:   ":9001",
+		MetricsAddr:     ":9090",
 		ShutdownTimeout: 10 * time.Second,
 		AdminRateLimit:  20,
 		AdminRateBurst:  40,
@@ -505,6 +537,7 @@ func TestValidate_PartialTLSConfigRejection(t *testing.T) {
 		Environment:      "development",
 		HTTPAddr:         ":8090",
 		AuthzGRPCAddr:    ":9001",
+		MetricsAddr:      ":9090",
 		ShutdownTimeout:  10 * time.Second,
 		AdminRateLimit:   20,
 		AdminRateBurst:   40,

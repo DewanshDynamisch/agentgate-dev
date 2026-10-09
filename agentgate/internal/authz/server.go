@@ -3,10 +3,12 @@ package authz
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/credential"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
+	"github.com/Dynamisch-LLC/agentgate/internal/metrics"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -28,6 +30,11 @@ type CredentialedEvaluator interface {
 type ServerOptions struct {
 	// RequireDownstreamCredential denies Allow decisions that carry no minted credential.
 	RequireDownstreamCredential bool
+
+	// Metrics instrumentation options (optional)
+	DecisionsTotal             *metrics.CounterVec
+	DecisionDurationSeconds    *metrics.HistogramVec
+	CredentialIssuanceFailures *metrics.Counter
 }
 
 // Server implements Envoy's v3 ext_authz AuthorizationServer interface.
@@ -37,6 +44,10 @@ type Server struct {
 	decisionSvc DecisionEvaluator
 
 	requireCredential bool
+
+	decisionsTotal             *metrics.CounterVec
+	decisionDurationSeconds    *metrics.HistogramVec
+	credentialIssuanceFailures *metrics.Counter
 }
 
 // NewServer constructs an ext_authz gRPC Server.
@@ -50,14 +61,39 @@ func NewServer(adapter *Adapter, decisionSvc DecisionEvaluator) *Server {
 // NewServerWithOptions constructs an ext_authz gRPC Server with explicit options.
 func NewServerWithOptions(adapter *Adapter, decisionSvc DecisionEvaluator, opts ServerOptions) *Server {
 	return &Server{
-		adapter:           adapter,
-		decisionSvc:       decisionSvc,
-		requireCredential: opts.RequireDownstreamCredential,
+		adapter:                    adapter,
+		decisionSvc:                decisionSvc,
+		requireCredential:          opts.RequireDownstreamCredential,
+		decisionsTotal:             opts.DecisionsTotal,
+		decisionDurationSeconds:    opts.DecisionDurationSeconds,
+		credentialIssuanceFailures: opts.CredentialIssuanceFailures,
 	}
 }
 
+// SetMetrics configures Prometheus metrics on the Server.
+func (s *Server) SetMetrics(decisions *metrics.CounterVec, duration *metrics.HistogramVec, credFailures *metrics.Counter) {
+	s.decisionsTotal = decisions
+	s.decisionDurationSeconds = duration
+	s.credentialIssuanceFailures = credFailures
+}
+
 // Check evaluates an incoming Envoy v3 ext_authz CheckRequest.
-func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
+func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (resp *authv3.CheckResponse, _ error) {
+	start := time.Now()
+	defer func() {
+		if resp != nil {
+			dec, reason := extractResponseDecision(resp)
+			if dec != "" {
+				if s.decisionsTotal != nil {
+					s.decisionsTotal.Inc(dec, reason)
+				}
+				if s.decisionDurationSeconds != nil {
+					s.decisionDurationSeconds.Observe(time.Since(start).Seconds(), dec)
+				}
+			}
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
@@ -206,6 +242,10 @@ func (s *Server) buildOkResponse(res decision.Result, cred *credential.Credentia
 }
 
 func (s *Server) buildDeniedResponse(reason decision.ReasonCode, msg, execID string) *authv3.CheckResponse {
+	if s.credentialIssuanceFailures != nil && reason == decision.ReasonCredentialIssuanceFailure {
+		s.credentialIssuanceFailures.Inc()
+	}
+
 	headers := []*corev3.HeaderValueOption{
 		{
 			Header: &corev3.HeaderValue{
@@ -250,4 +290,34 @@ func (s *Server) buildDeniedResponse(reason decision.ReasonCode, msg, execID str
 			},
 		},
 	}
+}
+
+func extractResponseDecision(resp *authv3.CheckResponse) (string, string) {
+	if resp == nil {
+		return "", ""
+	}
+	if ok := resp.GetOkResponse(); ok != nil {
+		reason := getOptionHeader(ok.GetHeaders(), "x-agentgate-reason")
+		if reason == "" {
+			reason = string(decision.ReasonPolicyAllow)
+		}
+		return "ALLOW", reason
+	}
+	if denied := resp.GetDeniedResponse(); denied != nil {
+		reason := getOptionHeader(denied.GetHeaders(), "x-agentgate-reason")
+		if reason == "" {
+			reason = string(decision.ReasonEvaluationError)
+		}
+		return "DENY", reason
+	}
+	return "DENY", string(decision.ReasonEvaluationError)
+}
+
+func getOptionHeader(headers []*corev3.HeaderValueOption, key string) string {
+	for _, h := range headers {
+		if h != nil && h.Header != nil && strings.EqualFold(h.Header.Key, key) {
+			return h.Header.Value
+		}
+	}
+	return ""
 }

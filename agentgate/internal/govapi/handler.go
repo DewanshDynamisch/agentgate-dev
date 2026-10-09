@@ -15,6 +15,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/auditevents"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 	"github.com/Dynamisch-LLC/agentgate/internal/governanceintegration"
+	"github.com/Dynamisch-LLC/agentgate/internal/metrics"
 	"github.com/Dynamisch-LLC/agentgate/internal/policy"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
@@ -24,15 +25,16 @@ import (
 
 // Handler serves policy governance REST endpoints.
 type Handler struct {
-	manager        *policymanager.Manager
-	govIntegration *governanceintegration.GovernanceDecisionService
-	auditStore     audit.Store
-	toolRegistry   *toolregistry.Registry
-	toolCatalog    ToolCatalogService
-	catalogMu      sync.Mutex
-	adminToken     string
-	auth           AdminAuthenticator
-	limiter        *ratelimit.Limiter
+	manager            *policymanager.Manager
+	govIntegration     *governanceintegration.GovernanceDecisionService
+	auditStore         audit.Store
+	toolRegistry       *toolregistry.Registry
+	toolCatalog        ToolCatalogService
+	catalogMu          sync.Mutex
+	adminToken         string
+	auth               AdminAuthenticator
+	limiter            *ratelimit.Limiter
+	adminRequestsTotal *metrics.CounterVec
 }
 
 // NewHandler constructs a new Handler.
@@ -65,6 +67,9 @@ func (h *Handler) SetAuthenticator(a AdminAuthenticator) { h.auth = a }
 
 // SetRateLimiter sets the rate limiter for governance routes.
 func (h *Handler) SetRateLimiter(l *ratelimit.Limiter) { h.limiter = l }
+
+// SetMetrics sets the counter for admin API requests.
+func (h *Handler) SetMetrics(counter *metrics.CounterVec) { h.adminRequestsTotal = counter }
 
 func (h *Handler) authenticator() AdminAuthenticator {
 	if h.auth != nil {
@@ -139,26 +144,64 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode  int
+	wroteHeader bool
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.statusCode = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	protect := func(fn http.HandlerFunc) http.HandlerFunc {
-		return h.rateLimitMiddleware(h.bodyLimitMiddleware(AdminAuthMiddlewareWith(h.authenticator(), fn)))
+	protect := func(pattern string, fn http.HandlerFunc) http.HandlerFunc {
+		wrapped := h.rateLimitMiddleware(h.bodyLimitMiddleware(AdminAuthMiddlewareWith(h.authenticator(), fn)))
+		return func(w http.ResponseWriter, r *http.Request) {
+			if h.adminRequestsTotal == nil {
+				wrapped(w, r)
+				return
+			}
+			rw := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			wrapped(rw, r)
+			h.adminRequestsTotal.Inc(pattern, strconv.Itoa(rw.statusCode))
+		}
 	}
 
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/validate", protect(h.handleValidate))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/rollback", protect(h.handleRollback))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/activate", protect(h.handleActivate))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/preview", protect(h.handlePreview))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/dryrun", protect(h.handleDryRunCompare))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/policies/{version}", protect(h.handleGetPolicy))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/policies", protect(h.handleListPolicies))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies", protect(h.handleCreateCandidate))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/audit-events", protect(h.handleListAuditEvents))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/tools", protect(h.handleListTools))
-	mux.HandleFunc("GET /api/v1/tools", protect(h.handleCatalogList))
-	mux.HandleFunc("GET /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogGet))
-	mux.HandleFunc("PUT /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogPut))
-	mux.HandleFunc("DELETE /api/v1/tools/{backend_id}/{tool_name}", protect(h.handleCatalogDelete))
+	register := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, protect(pattern, fn))
+	}
+
+	register("POST /api/v1/workspaces/{workspace_id}/policies/validate", h.handleValidate)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/rollback", h.handleRollback)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/activate", h.handleActivate)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/preview", h.handlePreview)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/dryrun", h.handleDryRunCompare)
+	register("GET /api/v1/workspaces/{workspace_id}/policies/{version}", h.handleGetPolicy)
+	register("GET /api/v1/workspaces/{workspace_id}/policies", h.handleListPolicies)
+	register("POST /api/v1/workspaces/{workspace_id}/policies", h.handleCreateCandidate)
+	register("GET /api/v1/workspaces/{workspace_id}/audit-events", h.handleListAuditEvents)
+	register("GET /api/v1/workspaces/{workspace_id}/tools", h.handleListTools)
+	register("GET /api/v1/tools", h.handleCatalogList)
+	register("GET /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogGet)
+	register("PUT /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogPut)
+	register("DELETE /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogDelete)
 }
 
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {

@@ -26,6 +26,7 @@ const (
 	defaultEnvironment     = "development"
 	defaultHTTPAddr        = ":8090"
 	defaultAuthzGRPCAddr   = ":9001"
+	defaultMetricsAddr     = ":9090"
 	defaultLogLevel        = "info"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultOIDCAdminRole   = "agentgate-admin"
@@ -45,6 +46,9 @@ type Config struct {
 
 	// AuthzGRPCAddr is the listen address for AgentGate's Envoy v3 ext_authz gRPC service.
 	AuthzGRPCAddr string
+
+	// MetricsAddr is the listen address for AgentGate's unauthenticated Prometheus metrics endpoint.
+	MetricsAddr string
 
 	// LogLevel controls the minimum severity written by the structured
 	// logger (see internal/logging).
@@ -113,6 +117,7 @@ func Load() (Config, error) {
 
 	cfg.Environment = normalizeEnvironment(getEnv(envPrefix+"ENV", defaultEnvironment))
 	cfg.HTTPAddr = getEnv(envPrefix+"HTTP_ADDR", defaultHTTPAddr)
+	cfg.MetricsAddr = getEnv(envPrefix+"METRICS_ADDR", defaultMetricsAddr)
 
 	grpcAddr := getEnv(envPrefix+"AUTHZ_GRPC_ADDR", "")
 	if grpcAddr == "" {
@@ -239,6 +244,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.AuthzGRPCAddr) == "" {
 		errs = append(errs, fmt.Sprintf("%sAUTHZ_GRPC_ADDR must not be empty", envPrefix))
+	}
+	if strings.TrimSpace(c.MetricsAddr) == "" {
+		errs = append(errs, fmt.Sprintf("%sMETRICS_ADDR must not be empty", envPrefix))
 	}
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, fmt.Sprintf("%sSHUTDOWN_TIMEOUT must be positive, got %s", envPrefix, c.ShutdownTimeout))

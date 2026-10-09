@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/httpserver"
 	"github.com/Dynamisch-LLC/agentgate/internal/identity"
 	"github.com/Dynamisch-LLC/agentgate/internal/logging"
+	"github.com/Dynamisch-LLC/agentgate/internal/metrics"
 	"github.com/Dynamisch-LLC/agentgate/internal/oidcverify"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
@@ -39,6 +41,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
+
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -58,9 +62,11 @@ func run() error {
 
 	logger := logging.New(cfg.LogLevel, os.Stdout)
 	logger.Info("starting agentgate",
+		"version", version,
 		"environment", cfg.Environment,
 		"http_addr", cfg.HTTPAddr,
 		"authz_grpc_addr", cfg.AuthzGRPCAddr,
+		"metrics_addr", cfg.MetricsAddr,
 	)
 
 	if cfg.AdminTokenGenerated {
@@ -126,8 +132,11 @@ func run() error {
 		logger.Info("using in-memory policy and audit store")
 	}
 
+	metricsBundle := metrics.NewMetrics(version)
+
 	redactor := audit.NewRedactor(cfg.AuditSalt, nil)
 	auditedDecisionSvc := audit.NewAuditedDecisionService(nil, auditStore, redactor)
+	auditedDecisionSvc.SetMetrics(metricsBundle.AuditAppendFailuresTotal)
 
 	policyMgr := policymanager.NewWithListener(store, auditedDecisionSvc)
 	govIntegration := governanceintegration.NewGovernanceDecisionService(policyMgr)
@@ -168,6 +177,7 @@ func run() error {
 	}
 	govHandler.SetAuthenticator(adminAuth)
 	govHandler.SetRateLimiter(ratelimit.New(cfg.AdminRateLimit, cfg.AdminRateBurst))
+	govHandler.SetMetrics(metricsBundle.AdminRequestsTotal)
 	govHandler.RegisterRoutes(srv.Mux())
 	apidocs.RegisterRoutes(srv.Mux())
 	logger.Info("governance API docs available", "path", "/docs")
@@ -203,6 +213,9 @@ func run() error {
 
 	authzServer := authz.NewServerWithOptions(authzAdapter, auditedDecisionSvc, authz.ServerOptions{
 		RequireDownstreamCredential: cfg.RequireDownstreamCredential,
+		DecisionsTotal:              metricsBundle.DecisionsTotal,
+		DecisionDurationSeconds:     metricsBundle.DecisionDurationSeconds,
+		CredentialIssuanceFailures:  metricsBundle.CredentialIssuanceFailures,
 	})
 
 	// Start ext_authz gRPC Server
@@ -239,6 +252,30 @@ func run() error {
 	}()
 	logger.Info("authz grpc server listening", "addr", cfg.AuthzGRPCAddr)
 
+	// Start Metrics HTTP Server on internal address
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", metricsBundle.Registry.Handler())
+	metricsServer := &http.Server{
+		Addr:              cfg.MetricsAddr,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+	}
+
+	metricsListener, err := net.Listen("tcp", cfg.MetricsAddr)
+	if err != nil {
+		return fmt.Errorf("listen metrics http: %w", err)
+	}
+	defer metricsListener.Close()
+
+	go func() {
+		if err := metricsServer.Serve(metricsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics http server stopped with error", "err", err)
+		}
+	}()
+	logger.Info("metrics http server listening", "addr", cfg.MetricsAddr)
+
 	// Start HTTP Server
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("start http server: %w", err)
@@ -256,6 +293,11 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("shutdown metrics http server error", "err", err)
+	}
+
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown http server: %w", err)
 	}
