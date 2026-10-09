@@ -2,19 +2,15 @@ name: CI
 
 # Single CI workflow for the AgentGate repository.
 #
-# The Go module lives in agentgate/ (module path
-# "github.com/Dynamisch-LLC/agentgate"), per docs/PROJECT_DEFINITION.md §11's
-# top-level layout — the repository root
-# also holds docs/ and, in later phases, non-Go artifacts (gateway config,
-# Cedar policies, migrations). Every Go step below runs with
-# working-directory: agentgate and is gated on agentgate/go.mod existing,
-# so this workflow degrades gracefully (green, with a notice) on any commit
-# that predates the Go module and requires no further edits now that it
-# exists.
-#
-# See docs/DEVELOPMENT/CI_BASELINE.md for the rationale and what is
-# intentionally deferred to a later phase (Docker builds, SBOM, signing,
-# deployment, integration containers).
+# Covers:
+# - Go validation (gofmt, vet, test -race, golangci-lint, govulncheck)
+# - Demo module Go unit tests (support-desk-mcp, demo-agent)
+# - Frontend contract & Admin UI application (typecheck, tests, lint)
+# - Docker image builds (Dockerfile.agentgate, Dockerfile.admin-ui,
+#   Dockerfile.support-desk-mcp, Dockerfile.demo-agent - no push)
+# - G6 live enforcement E2E
+# - Demo live enforcement E2E
+# - V1 production live security gate suite
 
 on:
   push:
@@ -39,10 +35,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Nothing below assumes the Go module exists. If a future commit
-      # ever removes it, this step reports the skip and the job still ends
-      # green — there is no code to validate, and CI must not fabricate a
-      # fake module just to exercise itself.
       - name: Detect Go module
         id: gomod
         shell: bash
@@ -91,15 +83,117 @@ jobs:
         if: steps.gomod.outputs.exists == 'true'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  demo-module-tests:
+    name: Demo module tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agentgate/go.mod
+          check-latest: true
+
+      - name: Test support-desk-mcp (race-enabled)
+        working-directory: deploy/demo/support-desk-mcp
+        run: go test -race ./...
+
+      - name: Test demo-agent (race-enabled)
+        working-directory: deploy/prod/demo-agent
+        run: go test -race ./...
+
+  frontend:
+    name: Frontend validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect frontend packages
+        id: pkgs
+        shell: bash
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "frontend_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f frontend/app/package.json ]; then
+            echo "app_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/app/package-lock.json
+
+      # frontend/ (contract layer)
+      - name: Install dependencies (frontend)
+        if: steps.pkgs.outputs.frontend_exists == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript typecheck (frontend)
+        if: steps.pkgs.outputs.frontend_exists == 'true'
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Vitest tests (frontend)
+        if: steps.pkgs.outputs.frontend_exists == 'true'
+        working-directory: frontend
+        run: npm test
+
+      # frontend/app (Admin UI SPA)
+      - name: Install dependencies (frontend/app)
+        if: steps.pkgs.outputs.app_exists == 'true'
+        working-directory: frontend/app
+        run: npm ci
+
+      - name: Build (frontend/app)
+        if: steps.pkgs.outputs.app_exists == 'true'
+        working-directory: frontend/app
+        run: npm run build
+
+      - name: Vitest tests (frontend/app)
+        if: steps.pkgs.outputs.app_exists == 'true'
+        working-directory: frontend/app
+        run: npm test
+
+      - name: Lint (frontend/app)
+        if: steps.pkgs.outputs.app_exists == 'true'
+        working-directory: frontend/app
+        run: npm run lint
+
+  images:
+    name: Build container images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build agentgate image
+        run: docker build -f deploy/docker/Dockerfile.agentgate -t agentgate:test .
+
+      - name: Build admin-ui image
+        run: docker build -f deploy/docker/Dockerfile.admin-ui -t admin-ui:test .
+
+      - name: Build support-desk-mcp image
+        run: docker build -f deploy/docker/Dockerfile.support-desk-mcp -t support-desk-mcp:test .
+
+      - name: Build demo-agent image
+        run: docker build -f deploy/docker/Dockerfile.demo-agent -t demo-agent:test .
+
   g6-live-e2e:
     name: G6 live enforcement E2E
     runs-on: ubuntu-latest
-    # DoD item 4, G7 Task A (docs/PHASES/G7_WORKSTREAMS/02_AI_GATEWAY_G7.md §2):
-    # ubuntu-latest ships both Docker and PowerShell Core (pwsh) by default, so
-    # this runs the exact same script a developer runs locally — no duplicated
-    # logic, no separate CI-only test path. No secrets needed: every credential
-    # deploy/g6 uses is an explicit, checked-in dev fixture (see
-    # docker-compose.yml's top comment and deploy/g6/jwks/README.md).
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -121,43 +215,52 @@ jobs:
         working-directory: deploy/g6
         run: docker compose down -v
 
-  frontend:
-    name: Frontend validation
+  demo-live-e2e:
+    name: Demo live enforcement E2E
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect frontend package
-        id: frontend_pkg
+      - name: Run demo live E2E
+        shell: pwsh
+        run: ./run-demo-e2e.ps1
+        working-directory: deploy/demo
+
+      - name: Dump container logs on failure
+        if: failure()
         shell: bash
+        working-directory: deploy/demo
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        shell: bash
+        working-directory: deploy/demo
+        run: docker compose down -v
+
+  v1-security-gate:
+    name: V1 production security gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up /work mount for test runner
         run: |
-          if [ -f package.json ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          sudo mkdir -p /work
+          sudo mount --bind "$GITHUB_WORKSPACE" /work
 
-      - name: Set up Node.js
-        if: steps.frontend_pkg.outputs.exists == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Run V1 security gate
+        shell: pwsh
+        run: ./deploy/prod/scripts/run-security-gate.ps1
 
-      - name: Install dependencies
-        if: steps.frontend_pkg.outputs.exists == 'true'
-        run: npm ci
+      - name: Dump container logs on failure
+        if: failure()
+        shell: bash
+        run: docker compose -f deploy/prod/docker-compose.yml logs --tail=300
 
-      - name: TypeScript typecheck
-        if: steps.frontend_pkg.outputs.exists == 'true'
-        run: npm run typecheck
-
-      - name: Vitest tests
-        if: steps.frontend_pkg.outputs.exists == 'true'
-        run: npm test
-
+      - name: Tear down
+        if: always()
+        shell: bash
+        run: docker compose -f deploy/prod/docker-compose.yml down -v
