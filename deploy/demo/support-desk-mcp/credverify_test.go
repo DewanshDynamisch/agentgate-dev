@@ -154,27 +154,31 @@ func TestVerify_ClaimFailures(t *testing.T) {
 		name   string
 		mutate func(c map[string]any)
 		tool   string
+		errSub string
 	}{
-		{"wrong iss", func(c map[string]any) { c["iss"] = "evil" }, "delete_ticket"},
-		{"wrong aud", func(c map[string]any) { c["aud"] = "other" }, "delete_ticket"},
+		{"wrong iss", func(c map[string]any) { c["iss"] = "evil" }, "delete_ticket", "invalid issuer"},
+		{"wrong aud", func(c map[string]any) { c["aud"] = "other" }, "delete_ticket", "invalid audience"},
 		{"expired", func(c map[string]any) {
 			c["iat"] = now.Add(-200 * time.Second).Unix()
 			c["nbf"] = now.Add(-200 * time.Second).Unix()
 			c["exp"] = now.Add(-100 * time.Second).Unix()
-		}, "delete_ticket"},
-		{"not yet valid", func(c map[string]any) { c["nbf"] = now.Add(120 * time.Second).Unix() }, "delete_ticket"},
-		{"lifetime 600", func(c map[string]any) { c["exp"] = now.Add(600 * time.Second).Unix() }, "delete_ticket"},
-		{"wrong tool", func(c map[string]any) { c["tool"] = "list_tickets" }, "delete_ticket"},
-		{"missing scope", func(c map[string]any) { c["scope"] = "tickets:read tickets:write" }, "delete_ticket"},
-		{"unknown tool", func(c map[string]any) { c["tool"] = "drop_db" }, "drop_db"},
+		}, "delete_ticket", "expired"},
+		{"not yet valid", func(c map[string]any) { c["nbf"] = now.Add(120 * time.Second).Unix() }, "delete_ticket", "not yet valid"},
+		{"lifetime 600", func(c map[string]any) { c["exp"] = now.Add(600 * time.Second).Unix() }, "delete_ticket", "lifetime too long"},
+		{"wrong tool", func(c map[string]any) { c["tool"] = "list_tickets" }, "delete_ticket", "not issued for this tool"},
+		{"missing scope", func(c map[string]any) { c["scope"] = "tickets:read tickets:write" }, "delete_ticket", "missing scope"},
+		{"unknown tool", func(c map[string]any) { c["tool"] = "drop_db" }, "drop_db", "no scope defined"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t)
 			c := validClaims(*e.clock)
 			tc.mutate(c)
-			if _, err := e.verify(t, signWith(t, e.key, rs256Header(testKid), c), tc.tool); err == nil {
+			_, err := e.verify(t, signWith(t, e.key, rs256Header(testKid), c), tc.tool)
+			if err == nil {
 				t.Fatal("expected error")
+			} else if !strings.Contains(err.Error(), tc.errSub) {
+				t.Fatalf("expected error containing %q, got %v", tc.errSub, err)
 			}
 		})
 	}
@@ -201,6 +205,8 @@ func TestVerify_ReplayedJTI(t *testing.T) {
 	}
 	if _, err := e.verify(t, tok, "delete_ticket"); err == nil {
 		t.Fatal("expected replay rejection")
+	} else if !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("expected replayed error, got %v", err)
 	}
 }
 

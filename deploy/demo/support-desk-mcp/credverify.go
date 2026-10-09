@@ -180,7 +180,7 @@ func (v *Verifier) Verify(ctx context.Context, authorizationHeader, toolName str
 		return Claims{}, errors.New("missing jti")
 	}
 	if !v.consumeJTI(raw.JTI, raw.Exp, now) {
-		return Claims{}, errors.New("credential already used")
+		return Claims{}, errors.New("credential replayed")
 	}
 
 	c := Claims{Sub: raw.Sub, Scope: raw.Scope, Tool: raw.Tool, Exec: raw.Exec, JTI: raw.JTI, Exp: raw.Exp}

@@ -3,6 +3,7 @@ package v1security_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -124,6 +125,14 @@ func TestV1_03_CredentialReplay(t *testing.T) {
 		t.Fatalf("expected status 401 on credential replay, got %d: %s", replayStatus, string(replayBody))
 	}
 
+	replayBodyStr := string(replayBody)
+	if !strings.Contains(replayBodyStr, "replayed") {
+		t.Fatalf("expected 401 body to indicate replayed, got: %s", replayBodyStr)
+	}
+	if strings.Contains(replayBodyStr, "expired") {
+		t.Fatalf("expected 401 body NOT to indicate expired, got: %s", replayBodyStr)
+	}
+
 	stateAfter := cfg.GetBackendState(t)
 	if stateAfter.Count != stateBefore.Count {
 		t.Fatalf("backend state mutated on replayed credential: count before=%d after=%d", stateBefore.Count, stateAfter.Count)
@@ -170,8 +179,39 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 		t.Fatal("failed to capture credential for expiry test")
 	}
 
+	parts := strings.Split(cred, ".")
+	if len(parts) != 3 {
+		t.Fatalf("malformed credential: %s", cred)
+	}
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("failed to decode payload: %v", err)
+	}
+	var claims struct {
+		Iat int64 `json:"iat"`
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		t.Fatalf("failed to unmarshal claims: %v", err)
+	}
+	if claims.Exp-claims.Iat > 60 {
+		t.Fatalf("credential lifetime > 60s: %d", claims.Exp-claims.Iat)
+	}
+
 	t.Log("TestV1_05_CredentialExpiry: waiting 71 seconds for credential expiry...")
 	time.Sleep(71 * time.Second)
+
+	expTime := time.Unix(claims.Exp, 0)
+	targetTime := expTime.Add(11 * time.Second)
+	if time.Now().Before(targetTime) {
+		extra := targetTime.Sub(time.Now())
+		t.Logf("Clock skew detected. Sleeping an extra %v to ensure now > exp + 10s...", extra)
+		time.Sleep(extra)
+	}
+
+	if !time.Now().After(expTime.Add(10 * time.Second)) {
+		t.Fatalf("expected time.Now() > exp + 10s, got now=%v, exp=%v", time.Now().Format(time.RFC3339), expTime.Format(time.RFC3339))
+	}
 
 	expStatus, expBody, err := cfg.CallBackendDirect(t, cred, "list_tickets", nil)
 	if err != nil {
@@ -180,6 +220,15 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 	if expStatus != http.StatusUnauthorized {
 		t.Fatalf("expected status 401 for expired credential after 71s, got %d: %s", expStatus, string(expBody))
 	}
+	
+	expBodyStr := string(expBody)
+	if !strings.Contains(expBodyStr, "expired") {
+		t.Fatalf("expected 401 body to indicate expired, got: %s", expBodyStr)
+	}
+	if strings.Contains(expBodyStr, "replayed") {
+		t.Fatalf("expected 401 body NOT to indicate replayed, got: %s", expBodyStr)
+	}
+	
 	t.Log("TestV1_05_CredentialExpiry: passed (received 401 as expected)")
 }
 
