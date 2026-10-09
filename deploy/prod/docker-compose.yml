@@ -226,6 +226,40 @@ services:
     networks:
       - agentgate-prod
 
+  demo-agent:
+    image: agentgate/demo-agent:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.demo-agent
+    container_name: prod-demo-agent
+    profiles: ["demo"]
+    restart: unless-stopped
+    command:
+      - "-gateway-url=https://agentgateway:3000"
+      - "-token-url=https://keycloak:8443/realms/agentgate/protocol/openid-connect/token"
+      - "-ca-file=/run/secrets/ca.crt"
+      - "-clients=agent-reader:/run/secrets/agent_reader_secret,agent-admin:/run/secrets/agent_admin_secret"
+      - "-rate=1.0"
+      - "-duration=0s"
+    environment:
+      DEMO_AGENT_GATEWAY_URL: "https://agentgateway:3000"
+      DEMO_AGENT_TOKEN_URL: "https://keycloak:8443/realms/agentgate/protocol/openid-connect/token"
+      DEMO_AGENT_CA_FILE: "/run/secrets/ca.crt"
+      DEMO_AGENT_CLIENTS: "agent-reader:/run/secrets/agent_reader_secret,agent-admin:/run/secrets/agent_admin_secret"
+      DEMO_AGENT_RATE: "1.0"
+      DEMO_AGENT_DURATION: "0s"
+    secrets:
+      - ca.crt
+      - agent_reader_secret
+      - agent_admin_secret
+    depends_on:
+      agentgateway:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    networks:
+      - agentgate-prod
+
 networks:
   agentgate-prod:
     name: agentgate-prod
@@ -261,3 +295,7 @@ secrets:
     file: ./secrets/keycloak.crt
   keycloak.key:
     file: ./secrets/keycloak.key
+  agent_reader_secret:
+    file: ./secrets/agent_reader_secret
+  agent_admin_secret:
+    file: ./secrets/agent_admin_secret
