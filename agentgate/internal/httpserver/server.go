@@ -8,6 +8,7 @@ package httpserver
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,6 +27,8 @@ type Server struct {
 	mux            *http.ServeMux
 	ready          atomic.Bool
 	readinessCheck func(context.Context) error
+	certFile       string
+	keyFile        string
 }
 
 // New constructs a Server bound to addr. It does not open a listener until
@@ -68,6 +71,33 @@ func (s *Server) SetReadinessCheck(check func(context.Context) error) {
 	s.readinessCheck = check
 }
 
+// SetTLSConfig configures TLS on the HTTP server using a provided *tls.Config.
+func (s *Server) SetTLSConfig(tlsCfg *tls.Config) {
+	s.srv.TLSConfig = tlsCfg
+}
+
+// SetTLS configures certificate and key files for TLS.
+func (s *Server) SetTLS(certFile, keyFile string) {
+	s.certFile = certFile
+	s.keyFile = keyFile
+}
+
+// TLSConfig returns the current TLS configuration, if any.
+func (s *Server) TLSConfig() *tls.Config {
+	return s.srv.TLSConfig
+}
+
+// IsTLS reports whether TLS is configured on the server.
+func (s *Server) IsTLS() bool {
+	return s.srv.TLSConfig != nil || (s.certFile != "" && s.keyFile != "")
+}
+
+// ListenAndServeTLS starts listening and serving TLS on the configured address,
+// blocking until an error occurs or the server is closed.
+func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
+	return s.srv.ListenAndServeTLS(certFile, keyFile)
+}
+
 // Start binds the listener and begins serving in the background. It
 // returns as soon as the listener is bound, so a caller learns immediately
 // whether the configured address is usable, rather than blocking for the
@@ -81,8 +111,16 @@ func (s *Server) Start() error {
 	s.ready.Store(true)
 
 	go func() {
-		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("http server exited unexpectedly", "error", err)
+		var serveErr error
+		if s.srv.TLSConfig != nil {
+			serveErr = s.srv.ServeTLS(ln, "", "")
+		} else if s.certFile != "" && s.keyFile != "" {
+			serveErr = s.srv.ServeTLS(ln, s.certFile, s.keyFile)
+		} else {
+			serveErr = s.srv.Serve(ln)
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			s.logger.Error("http server exited unexpectedly", "error", serveErr)
 		}
 	}()
 

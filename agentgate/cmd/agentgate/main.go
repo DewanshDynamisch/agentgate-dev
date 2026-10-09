@@ -32,9 +32,11 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
 	"github.com/Dynamisch-LLC/agentgate/internal/ratelimit"
+	"github.com/Dynamisch-LLC/agentgate/internal/tlsconfig"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -71,6 +73,14 @@ func run() error {
 	}
 
 	srv := httpserver.New(cfg.HTTPAddr, logger)
+	if cfg.HTTPTLSCert != "" && cfg.HTTPTLSKey != "" {
+		httpTLSCfg, err := tlsconfig.ServerTLS(cfg.HTTPTLSCert, cfg.HTTPTLSKey, "")
+		if err != nil {
+			return fmt.Errorf("configure http tls: %w", err)
+		}
+		srv.SetTLSConfig(httpTLSCfg)
+		logger.Info("http server configured with TLS")
+	}
 
 	var store policystore.Store
 	var auditStore audit.Store
@@ -202,14 +212,24 @@ func run() error {
 	}
 	defer grpcListener.Close()
 
-	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(2*1024*1024),
+	grpcOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(2 * 1024 * 1024),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ConnectionTimeout(5*time.Second),
-	)
+		grpc.ConnectionTimeout(5 * time.Second),
+	}
+	if cfg.AuthzTLSCert != "" && cfg.AuthzTLSKey != "" {
+		tlsCfg, err := tlsconfig.ServerTLS(cfg.AuthzTLSCert, cfg.AuthzTLSKey, cfg.AuthzTLSClientCA)
+		if err != nil {
+			return fmt.Errorf("configure authz grpc tls: %w", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		logger.Info("authz grpc server configured with TLS", "client_mtls", cfg.AuthzTLSClientCA != "")
+	}
+
+	grpcServer := grpc.NewServer(grpcOpts...)
 	authv3.RegisterAuthorizationServer(grpcServer, authzServer)
 
 	go func() {

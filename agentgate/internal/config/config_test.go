@@ -267,6 +267,11 @@ func TestValidate_ProductionMissingEverythingReportsAll(t *testing.T) {
 		{"CredentialAudiences is empty", "CredentialAudiences"},
 		{"AdminRateLimit is non-positive", "ADMIN_RATE_LIMIT"},
 		{"AdminRateBurst is non-positive", "ADMIN_RATE_BURST"},
+		{"AuthzTLSCert is empty", "AuthzTLSCert"},
+		{"AuthzTLSKey is empty", "AuthzTLSKey"},
+		{"AuthzTLSClientCA is empty", "AuthzTLSClientCA"},
+		{"HTTPTLSCert is empty", "HTTPTLSCert"},
+		{"HTTPTLSKey is empty", "HTTPTLSKey"},
 	}
 
 	for _, c := range checks {
@@ -292,6 +297,11 @@ func TestValidate_ProductionAuditSaltDevFixtureRejection(t *testing.T) {
 		AuditSalt:                "audit-salt-demo-dev-fixture",
 		CredentialSigningKeyFile: "/path/to/key.pem",
 		CredentialAudiences:      map[string]string{"mcp": "aud"},
+		AuthzTLSCert:             "/path/to/grpc.crt",
+		AuthzTLSKey:              "/path/to/grpc.key",
+		AuthzTLSClientCA:         "/path/to/ca.crt",
+		HTTPTLSCert:              "/path/to/http.crt",
+		HTTPTLSKey:               "/path/to/http.key",
 	}
 
 	err := cfg.Validate()
@@ -319,6 +329,11 @@ func TestValidate_ProductionDatabaseURLSSLModeDisable(t *testing.T) {
 		AuditSalt:                "production-secure-audit-salt",
 		CredentialSigningKeyFile: "/path/to/key.pem",
 		CredentialAudiences:      map[string]string{"mcp": "aud"},
+		AuthzTLSCert:             "/path/to/grpc.crt",
+		AuthzTLSKey:              "/path/to/grpc.key",
+		AuthzTLSClientCA:         "/path/to/ca.crt",
+		HTTPTLSCert:              "/path/to/http.crt",
+		HTTPTLSKey:               "/path/to/http.key",
 		DBAllowInsecure:          false,
 	}
 
@@ -374,4 +389,117 @@ func TestLoad_DevGeneratesRandomAdminToken(t *testing.T) {
 		t.Fatal("expected AdminTokenGenerated to be true")
 	}
 }
+
+func TestValidate_ProductionRequiresTLSFields(t *testing.T) {
+	baseCfg := func() Config {
+		return Config{
+			Environment:              "production",
+			HTTPAddr:                 ":8090",
+			AuthzGRPCAddr:            ":9001",
+			ShutdownTimeout:          10 * time.Second,
+			AdminRateLimit:           20,
+			AdminRateBurst:           40,
+			AdminAuthMode:            "oidc",
+			OIDCIssuerURL:            "https://idp.example",
+			OIDCAudience:             "agentgate",
+			OIDCAdminRole:            "agentgate-admin",
+			DatabaseURL:              "postgres://localhost:5432/db?sslmode=require",
+			AuditSalt:                "production-secure-audit-salt",
+			CredentialSigningKeyFile: "/path/to/key.pem",
+			CredentialAudiences:      map[string]string{"mcp": "aud"},
+			AuthzTLSCert:             "/path/to/grpc.crt",
+			AuthzTLSKey:              "/path/to/grpc.key",
+			AuthzTLSClientCA:         "/path/to/ca.crt",
+			HTTPTLSCert:              "/path/to/http.crt",
+			HTTPTLSKey:               "/path/to/http.key",
+		}
+	}
+
+	// Baseline should be valid
+	cfg := baseCfg()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("baseCfg() must be valid, got: %v", err)
+	}
+
+	// Missing each TLS field must fail with descriptive error
+	cases := []struct {
+		name      string
+		mutate    func(*Config)
+		expectErr string
+	}{
+		{
+			name:      "missing AuthzTLSCert",
+			mutate:    func(c *Config) { c.AuthzTLSCert = "" },
+			expectErr: "AUTHZ_TLS_CERT",
+		},
+		{
+			name:      "missing AuthzTLSKey",
+			mutate:    func(c *Config) { c.AuthzTLSKey = "" },
+			expectErr: "AUTHZ_TLS_KEY",
+		},
+		{
+			name:      "missing AuthzTLSClientCA",
+			mutate:    func(c *Config) { c.AuthzTLSClientCA = "" },
+			expectErr: "AUTHZ_TLS_CLIENT_CA",
+		},
+		{
+			name:      "missing HTTPTLSCert",
+			mutate:    func(c *Config) { c.HTTPTLSCert = "" },
+			expectErr: "HTTP_TLS_CERT",
+		},
+		{
+			name:      "missing HTTPTLSKey",
+			mutate:    func(c *Config) { c.HTTPTLSKey = "" },
+			expectErr: "HTTP_TLS_KEY",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseCfg()
+			tc.mutate(&c)
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("expected validation error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.expectErr) {
+				t.Errorf("error %q does not contain expected substring %q", err.Error(), tc.expectErr)
+			}
+		})
+	}
+}
+
+func TestValidate_PartialTLSConfigRejection(t *testing.T) {
+	// In development, setting cert without key or key without cert must fail
+	cfg := Config{
+		Environment:     "development",
+		HTTPAddr:        ":8090",
+		AuthzGRPCAddr:   ":9001",
+		ShutdownTimeout: 10 * time.Second,
+		AdminRateLimit:  20,
+		AdminRateBurst:  40,
+		AdminAuthMode:   "static",
+		AuthzTLSCert:    "/path/to/grpc.crt",
+		AuthzTLSKey:     "", // missing key
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AUTHZ_TLS") {
+		t.Fatalf("expected error for cert without key, got: %v", err)
+	}
+
+	cfg = Config{
+		Environment:     "development",
+		HTTPAddr:        ":8090",
+		AuthzGRPCAddr:   ":9001",
+		ShutdownTimeout: 10 * time.Second,
+		AdminRateLimit:  20,
+		AdminRateBurst:  40,
+		AdminAuthMode:   "static",
+		HTTPTLSCert:     "",
+		HTTPTLSKey:      "/path/to/http.key", // missing cert
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "HTTP_TLS") {
+		t.Fatalf("expected error for key without cert, got: %v", err)
+	}
+}
+
 

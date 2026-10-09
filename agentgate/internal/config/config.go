@@ -92,6 +92,16 @@ type Config struct {
 	// CredentialAudiences maps backendID to the audience of credentials minted for it.
 	CredentialAudiences         map[string]string
 	RequireDownstreamCredential bool
+
+	// AuthzTLSCert, AuthzTLSKey, AuthzTLSClientCA configure TLS and mTLS for
+	// the Envoy ext_authz gRPC listener.
+	AuthzTLSCert     string
+	AuthzTLSKey      string
+	AuthzTLSClientCA string
+
+	// HTTPTLSCert and HTTPTLSKey configure TLS for the admin HTTP listener.
+	HTTPTLSCert string
+	HTTPTLSKey  string
 }
 
 // Load reads configuration from the process environment, applies defaults
@@ -210,6 +220,12 @@ func Load() (Config, error) {
 	}
 	cfg.RequireDownstreamCredential = require
 
+	cfg.AuthzTLSCert = strings.TrimSpace(getEnv(envPrefix+"AUTHZ_TLS_CERT", ""))
+	cfg.AuthzTLSKey = strings.TrimSpace(getEnv(envPrefix+"AUTHZ_TLS_KEY", ""))
+	cfg.AuthzTLSClientCA = strings.TrimSpace(getEnv(envPrefix+"AUTHZ_TLS_CLIENT_CA", ""))
+	cfg.HTTPTLSCert = strings.TrimSpace(getEnv(envPrefix+"HTTP_TLS_CERT", ""))
+	cfg.HTTPTLSKey = strings.TrimSpace(getEnv(envPrefix+"HTTP_TLS_KEY", ""))
+
 	return cfg, nil
 }
 
@@ -270,7 +286,21 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Sprintf("%sCREDENTIAL_AUDIENCES is empty (CredentialAudiences is empty)", envPrefix))
 		}
 
-		// TLS is not configured (Task 18 fields; add the check in Task 18).
+		if strings.TrimSpace(c.AuthzTLSCert) == "" {
+			errs = append(errs, fmt.Sprintf("%sAUTHZ_TLS_CERT is empty (AuthzTLSCert is empty)", envPrefix))
+		}
+		if strings.TrimSpace(c.AuthzTLSKey) == "" {
+			errs = append(errs, fmt.Sprintf("%sAUTHZ_TLS_KEY is empty (AuthzTLSKey is empty)", envPrefix))
+		}
+		if strings.TrimSpace(c.AuthzTLSClientCA) == "" {
+			errs = append(errs, fmt.Sprintf("%sAUTHZ_TLS_CLIENT_CA is empty (AuthzTLSClientCA is empty)", envPrefix))
+		}
+		if strings.TrimSpace(c.HTTPTLSCert) == "" {
+			errs = append(errs, fmt.Sprintf("%sHTTP_TLS_CERT is empty (HTTPTLSCert is empty)", envPrefix))
+		}
+		if strings.TrimSpace(c.HTTPTLSKey) == "" {
+			errs = append(errs, fmt.Sprintf("%sHTTP_TLS_KEY is empty (HTTPTLSKey is empty)", envPrefix))
+		}
 	} else {
 		if c.AdminAuthMode == "oidc" {
 			if strings.TrimSpace(c.OIDCIssuerURL) == "" {
@@ -283,6 +313,15 @@ func (c Config) Validate() error {
 				errs = append(errs, fmt.Sprintf("%sOIDC_ADMIN_ROLE must not be empty", envPrefix))
 			}
 		}
+	}
+
+	if (strings.TrimSpace(c.AuthzTLSCert) != "" && strings.TrimSpace(c.AuthzTLSKey) == "") ||
+		(strings.TrimSpace(c.AuthzTLSCert) == "" && strings.TrimSpace(c.AuthzTLSKey) != "") {
+		errs = append(errs, fmt.Sprintf("both %sAUTHZ_TLS_CERT and %sAUTHZ_TLS_KEY must be set if either is configured", envPrefix, envPrefix))
+	}
+	if (strings.TrimSpace(c.HTTPTLSCert) != "" && strings.TrimSpace(c.HTTPTLSKey) == "") ||
+		(strings.TrimSpace(c.HTTPTLSCert) == "" && strings.TrimSpace(c.HTTPTLSKey) != "") {
+		errs = append(errs, fmt.Sprintf("both %sHTTP_TLS_CERT and %sHTTP_TLS_KEY must be set if either is configured", envPrefix, envPrefix))
 	}
 
 	if len(errs) > 0 {
