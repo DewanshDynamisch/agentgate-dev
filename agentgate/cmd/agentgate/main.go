@@ -8,7 +8,9 @@ import (
 	"context"
 	"crypto/rsa"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -37,6 +39,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/tlsconfig"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -44,29 +47,333 @@ import (
 
 var version = "dev"
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "agentgate: "+err.Error())
-		os.Exit(1)
+var requiredMigrations = []string{
+	"001_create_policies",
+	"002_create_audit_events",
+	"003_add_downstream_credential_ref",
+	"004_create_tool_catalog",
+}
+
+// MigrationChecker verifies that required database migrations have been applied.
+type MigrationChecker interface {
+	VerifyMigrations(ctx context.Context, databaseURL string) error
+}
+
+// PostgresMigrationChecker checks the schema_migrations table in PostgreSQL.
+type PostgresMigrationChecker struct{}
+
+// VerifyMigrations ensures migrations 001–004 exist in schema_migrations.
+func (PostgresMigrationChecker) VerifyMigrations(ctx context.Context, databaseURL string) error {
+	poolCfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("parse database url: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	var exists bool
+	err = pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables 
+			WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'schema_migrations'
+		)
+	`).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("query schema_migrations table existence: %w", err)
+	}
+	if !exists {
+		return errors.New("unmigrated database: schema_migrations table does not exist")
+	}
+
+	rows, err := pool.Query(ctx, `SELECT version FROM schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("query schema_migrations: %w", err)
+	}
+	defer rows.Close()
+
+	applied := make(map[string]bool)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return fmt.Errorf("scan migration version: %w", err)
+		}
+		applied[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate migration rows: %w", err)
+	}
+
+	var missing []string
+	for _, req := range requiredMigrations {
+		if !applied[req] {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("unmigrated database: missing migrations %v", missing)
+	}
+	return nil
+}
+
+type commandDeps struct {
+	ctx              context.Context
+	loadConfig       func() (config.Config, error)
+	migrationChecker MigrationChecker
+	auditStore       audit.Store
+	policyStore      policystore.Store
+	toolStore        toolcatalog.Store
+	migrateFunc      func(ctx context.Context) error
+}
+
+func defaultDeps() commandDeps {
+	return commandDeps{
+		loadConfig:       config.Load,
+		migrationChecker: PostgresMigrationChecker{},
 	}
 }
 
-func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("validate config: %w", err)
+func main() {
+	os.Exit(runCommand(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func runCommand(args []string, stdout, stderr io.Writer) int {
+	return runCommandWithDeps(args, stdout, stderr, defaultDeps())
+}
+
+func runCommandWithDeps(args []string, stdout, stderr io.Writer, deps commandDeps) int {
+	subcmd := "serve"
+	var subcmdArgs []string
+	if len(args) > 0 {
+		subcmd = args[0]
+		subcmdArgs = args[1:]
 	}
 
-	logger := logging.New(cfg.LogLevel, os.Stdout)
+	ctx := deps.ctx
+	if ctx == nil {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
+
+	switch subcmd {
+	case "serve":
+		return runServe(ctx, subcmdArgs, stdout, stderr, deps)
+	case "migrate":
+		return runMigrate(ctx, subcmdArgs, stdout, stderr, deps)
+	case "verify-audit":
+		return runVerifyAudit(ctx, subcmdArgs, stdout, stderr, deps)
+	case "version":
+		return runVersion(stdout)
+	case "healthcheck":
+		return runHealthcheck(subcmdArgs, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown subcommand: %s\n", subcmd)
+		printUsage(stderr)
+		return 2
+	}
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: agentgate <command> [arguments]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  serve         Start the AgentGate governance gateway (default)")
+	fmt.Fprintln(w, "  migrate       Run database migrations and exit")
+	fmt.Fprintln(w, "  verify-audit  Verify cryptographic integrity of audit records for a workspace")
+	fmt.Fprintln(w, "  healthcheck   Check gateway health status via /healthz")
+	fmt.Fprintln(w, "  version       Print AgentGate version")
+}
+
+func runVersion(stdout io.Writer) int {
+	fmt.Fprintln(stdout, version)
+	return 0
+}
+
+func runHealthcheck(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "", "HTTP listen address or port (defaults to AGENTGATE_HTTP_ADDR or 8090)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	port := "8090"
+	targetAddr := *addr
+	if targetAddr == "" {
+		targetAddr = os.Getenv("AGENTGATE_HTTP_ADDR")
+	}
+	if targetAddr != "" {
+		if _, p, err := net.SplitHostPort(targetAddr); err == nil && p != "" {
+			port = p
+		} else if !strings.Contains(targetAddr, ":") {
+			port = targetAddr
+		} else {
+			trimmed := strings.TrimPrefix(targetAddr, ":")
+			if trimmed != "" {
+				port = trimmed
+			}
+		}
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(stderr, "healthcheck failed: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(stderr, "healthcheck failed with HTTP status %d\n", resp.StatusCode)
+		return 1
+	}
+	fmt.Fprintln(stdout, "OK")
+	return 0
+}
+
+func runVerifyAudit(ctx context.Context, args []string, stdout, stderr io.Writer, deps commandDeps) int {
+	fs := flag.NewFlagSet("verify-audit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var workspaceID string
+	fs.StringVar(&workspaceID, "workspace", "", "workspace ID to verify audit records for")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if workspaceID == "" {
+		fmt.Fprintln(stderr, "error: --workspace is required")
+		return 2
+	}
+
+	store := deps.auditStore
+	if store == nil {
+		cfgLoader := deps.loadConfig
+		if cfgLoader == nil {
+			cfgLoader = config.Load
+		}
+		cfg, err := cfgLoader()
+		if err != nil {
+			fmt.Fprintf(stderr, "load config: %v\n", err)
+			return 1
+		}
+		if cfg.DatabaseURL != "" {
+			pgStore, err := audit.NewPostgresStore(ctx, cfg.DatabaseURL)
+			if err != nil {
+				fmt.Fprintf(stderr, "connect audit store: %v\n", err)
+				return 1
+			}
+			defer pgStore.Close()
+			store = pgStore
+		} else {
+			memStore := audit.NewMemoryStore()
+			defer memStore.Close()
+			store = memStore
+		}
+	}
+
+	verifier := audit.NewChainVerifier()
+	result, err := verifier.VerifyWorkspace(ctx, store, workspaceID)
+	if err != nil {
+		fmt.Fprintf(stderr, "verify audit chain: %v\n", err)
+		return 1
+	}
+
+	if !result.Valid {
+		fmt.Fprintf(stdout, "BROKEN at sequence %d: %s\n", result.BrokenSequence, result.Details)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "OK %d records\n", result.TotalRecords)
+	return 0
+}
+
+func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, deps commandDeps) int {
+	if deps.migrateFunc != nil {
+		if err := deps.migrateFunc(ctx); err != nil {
+			fmt.Fprintf(stderr, "migration failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "migrations applied successfully")
+		return 0
+	}
+
+	cfgLoader := deps.loadConfig
+	if cfgLoader == nil {
+		cfgLoader = config.Load
+	}
+	cfg, err := cfgLoader()
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return 1
+	}
+
+	if cfg.DatabaseURL == "" {
+		fmt.Fprintln(stderr, "error: AGENTGATE_DATABASE_URL is required to run migrations")
+		return 1
+	}
+
+	pgPolicyStore, err := policystore.NewPostgresStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(stderr, "connect postgres policy store: %v\n", err)
+		return 1
+	}
+	defer pgPolicyStore.Close()
+	if err := pgPolicyStore.Migrate(ctx); err != nil {
+		fmt.Fprintf(stderr, "migrate policy store: %v\n", err)
+		return 1
+	}
+
+	pgAuditStore, err := audit.NewPostgresStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(stderr, "connect postgres audit store: %v\n", err)
+		return 1
+	}
+	defer pgAuditStore.Close()
+	if err := pgAuditStore.Migrate(ctx); err != nil {
+		fmt.Fprintf(stderr, "migrate audit store: %v\n", err)
+		return 1
+	}
+
+	pgToolStore, err := toolcatalog.NewPostgresStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(stderr, "connect postgres tool catalog store: %v\n", err)
+		return 1
+	}
+	defer pgToolStore.Close()
+	if err := pgToolStore.Migrate(ctx); err != nil {
+		fmt.Fprintf(stderr, "migrate tool catalog store: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, "migrations applied successfully")
+	return 0
+}
+
+func runServe(ctx context.Context, args []string, stdout, stderr io.Writer, deps commandDeps) int {
+	cfgLoader := deps.loadConfig
+	if cfgLoader == nil {
+		cfgLoader = config.Load
+	}
+	cfg, err := cfgLoader()
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return 1
+	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "validate config: %v\n", err)
+		return 1
+	}
+
+	logger := logging.New(cfg.LogLevel, stdout)
 	logger.Info("starting agentgate",
 		"version", version,
 		"environment", cfg.Environment,
 		"http_addr", cfg.HTTPAddr,
 		"authz_grpc_addr", cfg.AuthzGRPCAddr,
 		"metrics_addr", cfg.MetricsAddr,
+		"auto_migrate", cfg.AutoMigrate,
 	)
 
 	if cfg.AdminTokenGenerated {
@@ -82,7 +389,8 @@ func run() error {
 	if cfg.HTTPTLSCert != "" && cfg.HTTPTLSKey != "" {
 		httpTLSCfg, err := tlsconfig.ServerTLS(cfg.HTTPTLSCert, cfg.HTTPTLSKey, "")
 		if err != nil {
-			return fmt.Errorf("configure http tls: %w", err)
+			fmt.Fprintf(stderr, "configure http tls: %v\n", err)
+			return 1
 		}
 		srv.SetTLSConfig(httpTLSCfg)
 		logger.Info("http server configured with TLS")
@@ -92,31 +400,51 @@ func run() error {
 	var auditStore audit.Store
 	var toolStore toolcatalog.Store
 	if cfg.DatabaseURL != "" {
-		pgStore, err := policystore.NewPostgresStore(context.Background(), cfg.DatabaseURL)
+		if !cfg.AutoMigrate {
+			checker := deps.migrationChecker
+			if checker == nil {
+				checker = PostgresMigrationChecker{}
+			}
+			if err := checker.VerifyMigrations(ctx, cfg.DatabaseURL); err != nil {
+				fmt.Fprintf(stderr, "unmigrated database: %v\n", err)
+				return 1
+			}
+		}
+
+		pgStore, err := policystore.NewPostgresStore(ctx, cfg.DatabaseURL)
 		if err != nil {
-			return fmt.Errorf("connect postgres policy store: %w", err)
+			fmt.Fprintf(stderr, "connect postgres policy store: %v\n", err)
+			return 1
 		}
 		defer pgStore.Close()
 
-		if err := pgStore.Migrate(context.Background()); err != nil {
-			return fmt.Errorf("migrate postgres policy store: %w", err)
+		if cfg.AutoMigrate {
+			if err := pgStore.Migrate(ctx); err != nil {
+				fmt.Fprintf(stderr, "migrate postgres policy store: %v\n", err)
+				return 1
+			}
 		}
 		store = pgStore
 
-		pgAuditStore, err := audit.NewPostgresStore(context.Background(), cfg.DatabaseURL)
+		pgAuditStore, err := audit.NewPostgresStore(ctx, cfg.DatabaseURL)
 		if err != nil {
-			return fmt.Errorf("connect postgres audit store: %w", err)
+			fmt.Fprintf(stderr, "connect postgres audit store: %v\n", err)
+			return 1
 		}
 		defer pgAuditStore.Close()
 
-		if err := pgAuditStore.Migrate(context.Background()); err != nil {
-			return fmt.Errorf("migrate postgres audit store: %w", err)
+		if cfg.AutoMigrate {
+			if err := pgAuditStore.Migrate(ctx); err != nil {
+				fmt.Fprintf(stderr, "migrate postgres audit store: %v\n", err)
+				return 1
+			}
 		}
 		auditStore = pgAuditStore
 
-		pgToolStore, err := toolcatalog.NewPostgresStore(context.Background(), cfg.DatabaseURL)
+		pgToolStore, err := toolcatalog.NewPostgresStore(ctx, cfg.DatabaseURL)
 		if err != nil {
-			return fmt.Errorf("connect postgres tool catalog store: %w", err)
+			fmt.Fprintf(stderr, "connect postgres tool catalog store: %v\n", err)
+			return 1
 		}
 		defer pgToolStore.Close()
 		toolStore = pgToolStore
@@ -143,17 +471,17 @@ func run() error {
 	auditedDecisionSvc.SetEvaluator(govIntegration)
 
 	// Seed default workspace baseline policy if none active
-	ctxInit := context.Background()
 	if _, err := policyMgr.GetActiveEngine("default"); err != nil {
-		if _, err := policyMgr.CreateCandidateWithVersion(ctxInit, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy"); err == nil {
-			_, _ = policyMgr.Activate(ctxInit, "default", "v1.0.0")
+		if _, err := policyMgr.CreateCandidateWithVersion(ctx, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy"); err == nil {
+			_, _ = policyMgr.Activate(ctx, "default", "v1.0.0")
 			logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
 		}
 	}
 
-	toolCatalog, err := loadToolCatalog(context.Background(), cfg, toolStore, logger)
+	toolCatalog, err := loadToolCatalog(ctx, cfg, toolStore, logger)
 	if err != nil {
-		return err
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 
 	// Build ext_authz adapter components
@@ -163,7 +491,8 @@ func run() error {
 		OnBehalfOfClaim: "obo",
 	})
 	if err != nil {
-		return fmt.Errorf("init identity mapper: %w", err)
+		fmt.Fprintf(stderr, "init identity mapper: %v\n", err)
+		return 1
 	}
 
 	govHandler := govapi.NewHandlerWithCatalog(policyMgr, cfg.AdminToken, govIntegration, auditStore, govapi.ToolCatalogService{
@@ -171,9 +500,10 @@ func run() error {
 		Catalog:  toolCatalog,
 		Listener: auditedDecisionSvc,
 	})
-	adminAuth, err := buildAdminAuthenticator(context.Background(), cfg, logger)
+	adminAuth, err := buildAdminAuthenticator(ctx, cfg, logger)
 	if err != nil {
-		return err
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 	govHandler.SetAuthenticator(adminAuth)
 	govHandler.SetRateLimiter(ratelimit.New(cfg.AdminRateLimit, cfg.AdminRateBurst))
@@ -182,9 +512,6 @@ func run() error {
 	apidocs.RegisterRoutes(srv.Mux())
 	logger.Info("governance API docs available", "path", "/docs")
 
-	// In G6 single-workspace integration deployment, AllowStaticWorkspace permits fallback to
-	// "default" when JWT does not declare a workspace_id claim. In multi-tenant environments,
-	// setting this to false enforces fail-closed rejection for requests lacking trusted workspace claims.
 	authzAdapter := authz.NewAdapter(authz.AdapterConfig{
 		DefaultWorkspaceID:   "default",
 		AllowStaticWorkspace: true,
@@ -195,7 +522,8 @@ func run() error {
 
 	signingKey, err := loadSigningKey(cfg, logger)
 	if err != nil {
-		return err
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 	audiences := cfg.CredentialAudiences
 	issuer, err := credential.NewJWTIssuer(credential.JWTIssuerConfig{
@@ -206,7 +534,8 @@ func run() error {
 		AudienceFor: func(backendID string) string { return audiences[backendID] },
 	})
 	if err != nil {
-		return fmt.Errorf("init credential issuer: %w", err)
+		fmt.Fprintf(stderr, "init credential issuer: %v\n", err)
+		return 1
 	}
 	auditedDecisionSvc.SetIssuer(issuer)
 	srv.Mux().Handle("GET /.well-known/jwks.json", credential.JWKSHandler(issuer.JWKS()))
@@ -221,7 +550,8 @@ func run() error {
 	// Start ext_authz gRPC Server
 	grpcListener, err := net.Listen("tcp", cfg.AuthzGRPCAddr)
 	if err != nil {
-		return fmt.Errorf("listen authz grpc: %w", err)
+		fmt.Fprintf(stderr, "listen authz grpc: %v\n", err)
+		return 1
 	}
 	defer grpcListener.Close()
 
@@ -236,7 +566,8 @@ func run() error {
 	if cfg.AuthzTLSCert != "" && cfg.AuthzTLSKey != "" {
 		tlsCfg, err := tlsconfig.ServerTLS(cfg.AuthzTLSCert, cfg.AuthzTLSKey, cfg.AuthzTLSClientCA)
 		if err != nil {
-			return fmt.Errorf("configure authz grpc tls: %w", err)
+			fmt.Fprintf(stderr, "configure authz grpc tls: %v\n", err)
+			return 1
 		}
 		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
 		logger.Info("authz grpc server configured with TLS", "client_mtls", cfg.AuthzTLSClientCA != "")
@@ -250,7 +581,7 @@ func run() error {
 			logger.Error("authz grpc server stopped with error", "err", err)
 		}
 	}()
-	logger.Info("authz grpc server listening", "addr", cfg.AuthzGRPCAddr)
+	logger.Info("authz grpc server listening", "addr", grpcListener.Addr().String())
 
 	// Start Metrics HTTP Server on internal address
 	metricsMux := http.NewServeMux()
@@ -265,7 +596,8 @@ func run() error {
 
 	metricsListener, err := net.Listen("tcp", cfg.MetricsAddr)
 	if err != nil {
-		return fmt.Errorf("listen metrics http: %w", err)
+		fmt.Fprintf(stderr, "listen metrics http: %v\n", err)
+		return 1
 	}
 	defer metricsListener.Close()
 
@@ -274,16 +606,15 @@ func run() error {
 			logger.Error("metrics http server stopped with error", "err", err)
 		}
 	}()
-	logger.Info("metrics http server listening", "addr", cfg.MetricsAddr)
+	logger.Info("metrics http server listening", "addr", metricsListener.Addr().String())
 
 	// Start HTTP Server
 	if err := srv.Start(); err != nil {
-		return fmt.Errorf("start http server: %w", err)
+		fmt.Fprintf(stderr, "start http server: %v\n", err)
+		return 1
 	}
 	logger.Info("http server listening", "addr", srv.Addr())
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	<-ctx.Done()
 
 	logger.Info("shutdown signal received, shutting down")
@@ -299,16 +630,19 @@ func run() error {
 	}
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown http server: %w", err)
+		fmt.Fprintf(stderr, "shutdown http server: %v\n", err)
+		return 1
 	}
 
 	logger.Info("agentgate stopped cleanly")
-	return nil
+	return 0
 }
 
 func loadToolCatalog(ctx context.Context, cfg config.Config, toolStore toolcatalog.Store, logger *slog.Logger) (*toolcatalog.Catalog, error) {
-	if err := toolStore.Migrate(ctx); err != nil {
-		return nil, fmt.Errorf("migrate tool catalog store: %w", err)
+	if cfg.AutoMigrate {
+		if err := toolStore.Migrate(ctx); err != nil {
+			return nil, fmt.Errorf("migrate tool catalog store: %w", err)
+		}
 	}
 	if cfg.ToolBootstrapFile != "" {
 		defs, err := toolcatalog.LoadBootstrapFile(cfg.ToolBootstrapFile)

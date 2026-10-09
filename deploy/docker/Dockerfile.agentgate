@@ -1,0 +1,26 @@
+FROM golang:1.25-alpine AS builder
+
+ENV GOTOOLCHAIN=local
+ARG VERSION=dev
+
+WORKDIR /src
+
+COPY agentgate/go.mod agentgate/go.sum* ./
+RUN go mod download
+
+COPY agentgate/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /bin/agentgate ./cmd/agentgate
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+USER nonroot:nonroot
+WORKDIR /
+
+COPY --from=builder /bin/agentgate /bin/agentgate
+
+EXPOSE 8090 9001 9090
+
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 CMD ["/bin/agentgate", "healthcheck"]
+
+ENTRYPOINT ["/bin/agentgate"]
+CMD ["serve"]

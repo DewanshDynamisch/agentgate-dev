@@ -75,6 +75,10 @@ type Config struct {
 	DatabaseURL     string
 	DBAllowInsecure bool
 
+	// AutoMigrate controls whether database migrations run automatically on startup.
+	// Defaults to true in development, false in production.
+	AutoMigrate bool
+
 	// AuditSalt is the deployment salt for argument hashing.
 	AuditSalt string
 
@@ -199,6 +203,19 @@ func Load() (Config, error) {
 	}
 
 	cfg.DatabaseURL = getEnv(envPrefix+"DATABASE_URL", "")
+
+	defaultAutoMigrate := cfg.Environment != "production"
+	autoMigrateStr := getEnv(envPrefix+"AUTO_MIGRATE", "")
+	if autoMigrateStr != "" {
+		autoMigrate, err := strconv.ParseBool(autoMigrateStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: invalid %sAUTO_MIGRATE %q: %w", envPrefix, autoMigrateStr, err)
+		}
+		cfg.AutoMigrate = autoMigrate
+	} else {
+		cfg.AutoMigrate = defaultAutoMigrate
+	}
+
 	cfg.ToolBootstrapFile = strings.TrimSpace(getEnv(envPrefix+"TOOL_BOOTSTRAP_FILE", ""))
 
 	cfg.CredentialSigningKeyFile = getEnv(envPrefix+"CREDENTIAL_SIGNING_KEY_FILE", "")

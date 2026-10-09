@@ -31,6 +31,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ShutdownTimeout != defaultShutdownTimeout {
 		t.Errorf("ShutdownTimeout = %v, want %v", cfg.ShutdownTimeout, defaultShutdownTimeout)
 	}
+	if !cfg.AutoMigrate {
+		t.Errorf("AutoMigrate = %v, want true (default in development)", cfg.AutoMigrate)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -69,6 +72,36 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != 2*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want %v", cfg.ShutdownTimeout, 2*time.Second)
+	}
+	if cfg.AutoMigrate {
+		t.Errorf("AutoMigrate = %v, want false (default in production)", cfg.AutoMigrate)
+	}
+}
+
+func TestAutoMigrateExplicit(t *testing.T) {
+	t.Setenv(envPrefix+"ENV", "production")
+	t.Setenv(envPrefix+"AUTO_MIGRATE", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.AutoMigrate {
+		t.Errorf("AutoMigrate = %v, want true", cfg.AutoMigrate)
+	}
+
+	t.Setenv(envPrefix+"ENV", "development")
+	t.Setenv(envPrefix+"AUTO_MIGRATE", "false")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AutoMigrate {
+		t.Errorf("AutoMigrate = %v, want false", cfg.AutoMigrate)
+	}
+
+	t.Setenv(envPrefix+"AUTO_MIGRATE", "invalid-bool")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for invalid AUTO_MIGRATE")
 	}
 }
 

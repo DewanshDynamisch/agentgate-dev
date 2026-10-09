@@ -1,0 +1,7 @@
+// Runtime configuration rendered at container startup by entrypoint.
+window.__AGENTGATE_CONFIG__ = {
+  apiUrl: "${AGENTGATE_UI_API_URL}",
+  oidcAuthority: "${AGENTGATE_UI_OIDC_AUTHORITY}",
+  oidcClientId: "${AGENTGATE_UI_OIDC_CLIENT_ID}",
+  oidcScope: "openid profile",
+};
