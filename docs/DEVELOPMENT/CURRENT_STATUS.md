@@ -1,6 +1,7 @@
 # AgentGate — Current Development Status
 
-**Last updated:** 2026-09-18
+**Last updated:** 2026-10-09
+**Release State:** v1.0.0-rc1 (Production Readiness Complete)
 
 This file states only what is true *right now*. It is rewritten in place, not appended to — for history, see each checkpoint's own `CLOSURE_SUMMARY.md` in `docs/PHASES/G{N}_WORKSTREAMS/` or `git log`. Full navigation: `docs/README.md`.
 
@@ -8,121 +9,124 @@ This file states only what is true *right now*. It is rewritten in place, not ap
 
 ## Where we are
 
-**Roadmap / progress tracker:** [`docs/PHASES/PROGRESS_AND_ROADMAP.md`](../PHASES/PROGRESS_AND_ROADMAP.md) — every checkpoint G1→G11, what's done, what's active, what's next, broken down by team with dependencies marked. Read that for scheduling; read this file for the current state of the code.
+AgentGate v1 Production Readiness (all 25 planned implementation and verification tasks) is **COMPLETE**. The codebase is frozen at **v1.0.0-rc1** on branch `feature/v1-production-readiness`.
 
-**Strategy in force:** [`docs/PHASES/AGENTGATE_V1_3_TEAM_PARALLEL_EXECUTION_PLAN.md`](../PHASES/AGENTGATE_V1_3_TEAM_PARALLEL_EXECUTION_PLAN.md) — 3 strictly independent teams (Backend, AI/Gateway, Frontend), superseding the 5-workstream gated model now that G1–G6 (its entire critical path) are closed. Checkpoint numbering (G7, G8, ...) continues unbroken; a checkpoint no longer requires every team to close together (see that plan's §4).
+Every subsystem, security boundary, and operational requirement defined in `docs/superpowers/plans/2026-09-29-agentgate-v1-production.md` has been implemented, tested, and verified against running container topologies:
+
+- **Full CI pipeline coverage:** 7 automated jobs in `.github/workflows/ci.yml` (`go`, `demo-module-tests`, `frontend`, `images`, `g6-live-e2e`, `demo-live-e2e`, `v1-security-gate`).
+- **Definitive operator runbook:** 12 verified operational runbook procedures documented in `docs/OPERATIONS/RUNBOOK.md`.
+- **Zero critical or high security defects:** Live 17-scenario security gate suite (`qa/v1security`) passing 100%.
 
 ### Checkpoint Milestones
 
-- **G1 — Authorization Contract Freeze: PASS / CLOSED / FROZEN** (2026-09-12). Lead Architect verdict recorded 2026-09-12. All five workstreams merged into `development`. Frozen contract: `agentgate/internal/decision.Request`/`Result`, documented in [`docs/PHASES/G1_WORKSTREAMS/GO_BACKEND_G1_CONTRACT.md`](../PHASES/G1_WORKSTREAMS/GO_BACKEND_G1_CONTRACT.md).
-- **G2 — Identity + Tool Governance boundary: PASS / CLOSED** (2026-09-13). Identity claims mapper (`internal/identity`), tool registry with canonical SHA-256 schema fingerprint & drift detection (`internal/toolregistry`), per-tool argument whitelist registry (`internal/argdecl`, resolving O-006), context assembly (`internal/contextassembly`), gateway inspection evidence, and `g2security` QA suite.
-- **G3 — Policy Persistence + Governance API: PASS / CLOSED** (2026-09-13). Policy store (`internal/policystore`, memory & Postgres implementations sharing one behavior test), lifecycle manager (`internal/policymanager`, content-addressed SHA-256 versions, atomic activation, cached engine, rollback, preview), admin governance REST API (`internal/govapi`), frontend governance client/state/views, `g3governance` QA suite, and `deploy/g3` reproducible Postgres environment.
-- **G4 — Governance Workflow Integration: PASS / CLOSED / FROZEN** (2026-09-14). Mutation audit events (`internal/auditevents`), governance-to-decision integration service (`internal/governanceintegration`, active-vs-candidate dry-run compare), `POST .../policies/{version}/dryrun` REST endpoint, frontend dry-run models/client/views, `g4integration` QA suite (8 DoD invariants), and `deploy/g4` E2E compose topology. Formally approved by Lead Architect 2026-09-14.
-- **G5 — Durable Audit Boundary: PASS / CLOSED / FROZEN** (2026-09-14). Append-only `audit_events` persistence in PostgreSQL (`internal/audit`), tamper-evident SHA-256 row chaining (`prev_hash` + `row_hash`), independent out-of-process `ChainVerifier`, pre-persistence argument redaction (`redact.go`), fail-closed audit enforcement (audit failure => decision `DENY`, resolving O-002), database immutability trigger (`prevent_audit_modification`), database privilege separation (`agentgate_app` vs `agentgate_migrator`), `g5audit` QA suite (9 DoD invariants), and `deploy/g5` reproducible topology. Formally approved by Lead Architect 2026-09-14.
-- **G6 — Real MCP End-to-End Enforcement: PASS / CLOSED / FROZEN** (2026-09-16). Lead Architect verdict recorded 2026-09-16. Envoy v3 `ext_authz` gRPC service (`internal/authz`), JSON-RPC 2.0 tool call adapter, trusted gateway identity metadata extraction, `TrustedWorkspaceResolver`, durable PostgreSQL audit with SHA-256 row chaining, adaptation-failure DENY auditing, live `agentgateway:v1.4.0` integration, independent black-box E2E enforcement suite (`qa/g6enforcement`, 12/12 DoD scenarios passing, live outage fail-closed verified, live service recovery verified), and G4-aligned credential hygiene in `deploy/g6`. Formally approved by Lead Architect 2026-09-16.
-- **Production UI is `frontend/app/` (O-009, resolved 2026-09-18).** Two independent teammates each
-  built a full React/Vite admin UI on 2026-09-18: `admin-ui/` (PR #3, morning) and `frontend/app/`
-  (PR #5/#6, evening — built from the G7 Frontend ticket, but without pulling `admin-ui/`'s merge
-  first). Both consumed the frozen `frontend/src` contract layer correctly. `admin-ui/` was removed
-  the same day in favor of `frontend/app/`, which already had committed automated test coverage and
-  its own API-contract proposal — a consolidation decision, not a quality judgment on the removed
-  one. See `docs/DECISIONS/OPEN_DECISIONS.md`'s O-009 (Resolved) for the full record.
-- **Active Checkpoint: G7 — OPEN, 2026-09-18.** Three self-contained team tickets in
-  `docs/PHASES/G7_WORKSTREAMS/`: `01_BACKEND_G7.md` (G6 evidence closeout + downstream credential
-  exchange, O-001, + governance read-surface APIs), `02_AI_GATEWAY_G7.md` (G6 evidence closeout,
-  environment half + realistic demonstration system), `03_FRONTEND_G7.md` (API contract proposal +
-  automated test coverage for `frontend/app/`). Each ticket states its own cross-team collaboration
-  points and blockers — nothing is centrally gated the way G1–G6 were.
+- **G1 — Authorization Contract Freeze: PASS / CLOSED / FROZEN** (2026-09-12). Frozen `internal/decision.Request`/`Result` contract. 37-test independent black-box suite.
+- **G2 — Identity + Tool Governance boundary: PASS / CLOSED** (2026-09-13). Identity claims mapper (`internal/identity`), tool registry with canonical SHA-256 schema fingerprint & drift detection (`internal/toolregistry`), typed argument whitelist (`internal/argdecl`, resolving O-006), and context assembly (`internal/contextassembly`).
+- **G3 — Policy Persistence + Governance API: PASS / CLOSED** (2026-09-13). Policy store (`internal/policystore`, PostgreSQL & Memory), lifecycle manager (`internal/policymanager`, content-addressed versions, atomic activation, cached engine, rollback), and admin governance REST API (`internal/govapi`).
+- **G4 — Governance Workflow Integration: PASS / CLOSED / FROZEN** (2026-09-14). Mutation audit events (`internal/auditevents`), dry-run candidate-vs-active evaluation (`internal/governanceintegration`), and `POST .../dryrun` endpoint.
+- **G5 — Durable Audit Boundary: PASS / CLOSED / FROZEN** (2026-09-14). Append-only `audit_events` in PostgreSQL (`internal/audit`), tamper-evident SHA-256 row chaining (`prev_hash` + `row_hash`), independent `ChainVerifier`, pre-persistence argument redaction (`redact.go`), fail-closed audit enforcement (resolving O-002), and DB immutability triggers.
+- **G6 — Real MCP End-to-End Enforcement: PASS / CLOSED / FROZEN** (2026-09-16, evidence closed 2026-09-21). Envoy v3 `ext_authz` gRPC service (`internal/authz`), JSON-RPC 2.0 tool call adapter, trusted gateway identity metadata extraction, and live integration with pinned `agentgateway:v1.4.0` (12/12 DoD scenarios passing).
+- **G7 — Evidence, Downstream Identity & Read Surface: PASS / CLOSED** (2026-09-29 → 2026-10-08). Downstream scoped credential minting (`internal/credential`, resolving O-001) with ephemeral RS256 JWTs, 60s lifetime, `jti` replay protection, audited reference hashes (`downstream_credential_ref`), governance read APIs (`GET .../audit-events`, `GET .../tools`), and realistic `support-desk-mcp` demonstration backend (`deploy/demo/`).
+- **G8 — Operator Visibility Complete: PASS / CLOSED** (2026-10-08). Admin UI (`frontend/app/`) fully wired to live backend APIs for Audit Logs, Tools Catalog, and Policy Lifecycle. All panels backed by real data; Vitest test suite passing (87/87 tests).
+- **G9 — Integration Breadth: PASS / CLOSED** (2026-10-09). Persistent PostgreSQL tool catalog store (`internal/toolcatalog`), runtime tool registration and risk reclassification via Admin API, and pinned MCP revision `2026-07-28` (O-004).
+- **G10 — Production Environment Readiness: PASS / CLOSED** (2026-10-09). Production Compose topology (`deploy/prod/docker-compose.yml`) with Keycloak 26 OIDC federation, mutual TLS (mTLS) upstream between agentgateway and agentgate, database privilege separation (`agentgate_app` vs `agentgate_migrator`), zero dev defaults in production mode, distroless container images, subcommands (`serve`, `migrate`, `verify-audit`, `healthcheck`), and Prometheus metrics on `:9090/metrics`.
+- **G11 — Release Candidate Security Gate: PASS / CLOSED** (2026-10-09). Automated clean-room verification (`clean-room.ps1`, 13/13 checks) and live 17-scenario security gate suite (`run-security-gate.ps1`, `qa/v1security`, 17/17 PASS). Full end-to-end audit and release candidate commit created (`chore(release): v1.0.0-rc1 status`).
 
 ---
 
-## What exists and runs today
+## Completed Production Architecture
 
-### Go backend (`agentgate/`)
-- Production service executable `cmd/agentgate` (config, structured JSON logging, health/readiness HTTP endpoints, graceful shutdown, and Envoy v3 `ext_authz` gRPC service on `:9001`).
-- Frozen Cedar authorization decision core (`internal/decision`, `internal/policy`, `internal/fixturepolicy`) + test-only mock binary `cmd/g1-mock-authz`.
-- Production Envoy v3 `ext_authz` gRPC service & adapter (`internal/authz`) converting JSON-RPC 2.0 `tools/call` into `decision.Request` with tool governance and argument whitelist enforcement.
-- Identity claims mapper (`internal/identity`) with fail-closed mapping across 4 failure classes.
-- Tool registry (`internal/toolregistry`) with canonical SHA-256 schema fingerprinting and drift detection.
-- Argument declaration whitelist registry (`internal/argdecl`) and context assembler (`internal/contextassembly`).
-- Policy persistence store (`internal/policystore`) with Memory and PostgreSQL implementations, partial unique active index, and embedded schema migrations.
-- Policy lifecycle manager (`internal/policymanager`) with atomic activation, concurrency-safe cached engine swap, rollback, preview, and mutation audit events (`internal/auditevents`).
-- Admin governance REST API (`internal/govapi`) with constant-time key comparison authentication.
-- Governance-decision integration bridge (`internal/governanceintegration`) with dry-run candidate-vs-active comparison.
-- **Durable audit boundary (`internal/audit`):** Postgres append-only persistence, SHA-256 row chaining, independent `ChainVerifier`, pre-persistence argument redaction, fail-closed enforcement, and DB immutability triggers.
+### 1. Gateway & Envoy v3 `ext_authz` Integration
+- Pinned `agentgateway:v1.4.0` (`sha256:771afaf093065477fa296eb90dcb618a0300165f12a32f80bbdd1427fab900ec`).
+- Communicates with AgentGate via Envoy v3 gRPC `envoy.service.auth.v3.Authorization/Check` on port `:9001` over mutual TLS (`internal/tlsconfig` with client certificate verification).
+- Inbound JSON-RPC 2.0 `tools/call` bodies are extracted from `AttributeContext_HttpRequest` up to 1 MiB (`maxRequestBytes: 1048576`).
+- Fail-closed behavior verified empirically: any failure (outage, policy deny, malformed payload, schema drift, unauthenticated token) results in `DENY` with 0 calls forwarded to the downstream backend.
 
-### Gateway / MCP (`gateway/` & `deploy/g6/`)
-- Reviewable `agentgateway` configuration (`gateway/config/g1-agentgateway.yaml` and `deploy/g6/agentgateway.yaml`) targeting AgentGate via `policies.extAuthz` (Envoy v3 gRPC protocol, request body inclusion).
-- Pinned `agentgateway:v1.4.0` verified with empirical probe tests (`docs/PHASES/G6_WORKSTREAMS/G6_GATEWAY_CONTRACT.md`).
-- Independent Go verification harness (`gateway/harness/`) asserting wire fixtures over real HTTP.
+### 2. Cedar Authorization Core
+- Pinned `cedar-go v1.8.0` encapsulated entirely within `internal/policy` (zero Cedar imports elsewhere).
+- Policy evaluation takes frozen `decision.Request` attributes (principal identity, roles, workspace, tool name, tool risk, and whitelisted typed arguments).
+- Thread-safe atomic swaps of active policy engine (`internal/policymanager`) with content-addressed SHA-256 versioning and rollback capabilities.
 
-### Frontend contract layer (`frontend/`)
-- Framework-agnostic TypeScript library (`src/api/governanceClient.ts`, `src/models/`, `src/state/`, `src/view/`) with full Vitest test coverage (63 tests across 7 suites) for governance, dry-run comparison, and rollback rendering.
+### 3. Identity & OIDC Admin Authentication
+- Production token verification via OIDC JWKS (`internal/oidcverify`) federated with Keycloak 26.
+- Strict audience enforcement (`aud: agentgate-gateway` for agents, `aud: agentgate-ops-cli` for admin CLI/UI).
+- Token type validation (rejects refresh/ID token replay as access tokens).
+- Fail-closed JWKS cache with 1-hour TTL and 30-second refetch throttling.
 
-### Admin UI (`frontend/app/`)
-- React/Vite production UI consuming the `frontend/src` contract layer via the `@contract` alias
-  (never reimplements it) — same `MockGovernanceClient`/`HttpGovernanceClient` split as the
-  contract layer itself, selected by `VITE_USE_MOCK`/admin-token presence. Policy workflow pages
-  (list/create/activate/dry-run) are real against the live backend and have committed Vitest
-  coverage (`ActivatePolicyPage.test.tsx`, `PoliciesListPage.test.tsx`,
-  `policy-workflow.test.ts`). Dashboard, Tools, Identities, and Audit are mock-backed pending the
-  read APIs G7 Task C is building (see `docs/PHASES/G7_WORKSTREAMS/01_BACKEND_G7.md` §5) — this is
-  a backend-readiness gap, not specific to this UI. Formerly `admin-ui/`, a parallel implementation
-  by a different teammate; removed 2026-09-18 in favor of this one (O-009, resolved).
+### 4. Downstream Ephemeral Credential Minting (O-001 Resolved)
+- Inbound bearer tokens never reach downstream MCP backends (proven by live assertion in `qa/v1security` and demo E2E).
+- Upon policy `ALLOW`, AgentGate mints an ephemeral RS256-signed JWT (`internal/credential`) scoped to the specific backend audience and tool call.
+- Downstream credentials carry a 60-second expiration (`exp`), unique `jti`, and audited reference hash (`downstream_credential_ref`).
+- Downstream MCP backends (`support-desk-mcp`) verify tokens via AgentGate's public JWKS endpoint (`/.well-known/jwks.json`) and reject duplicate tokens via an in-memory `jti` replay cache (`credverify.go`).
 
-### Deploy environments (`deploy/`)
-- `deploy/g3/`: Reproducible Postgres container + readiness probe + migration verification script.
-- `deploy/g4/`: Integrated governance-to-decision E2E topology with curl lifecycle runbook.
-- `deploy/g5/`: Reproducible Postgres topology with DB privilege separation (`agentgate_app` vs `agentgate_migrator`) and audit immutability triggers.
-- `deploy/g6/`: Integrated 4-service topology (`g6-postgres`, `g6-agentgate`, `g6-agentgateway`, `g6-probe-mcp`) on `g6net` with automated clean-run matrix runner `deploy/g6/run-e2e-matrix.ps1`.
+### 5. Tool Catalog Governance & Drift Detection
+- Persistent PostgreSQL tool storage (`internal/toolcatalog`) backing `internal/toolregistry`.
+- Canonical SHA-256 schema fingerprinting (`toolregistry.CanonicalSchemaFingerprint`) and drift detection (`CheckDrift`).
+- Per-tool argument whitelist registry (`internal/argdecl`, O-006) preventing arbitrary parameter injection into Cedar policy evaluation.
+- Dynamic tool registration, risk updates (`read`, `write`, `destructive`), and deletion via authenticated Admin REST API (`PUT/GET/DELETE /api/v1/tools/{backend_id}/{tool_name}`).
 
-### QA & Security proof suites (`agentgate/qa/`)
-- Six QA suites, black-box in the sense of exercising each checkpoint's contract rather than its
-  internals — but **only `qa/g1blackbox` actually imports zero `internal/*` packages**; the other
-  five import `internal/*` directly (corrected 2026-09-18; previously misstated as all six being
-  zero-import — verified by grep, not assumed):
-  1. `qa/g1blackbox`: Out-of-process contract verification against mock binary. Genuinely zero `internal/*` imports.
-  2. `qa/g2security`: Identity, tool abuse, argument whitelist, and trust boundary proofs.
-  3. `qa/g3governance`: Policy persistence, atomic activation, and Postgres lifecycle invariants.
-  4. `qa/g4integration`: Full governance-to-decision loop (8 DoD invariants).
-  5. `qa/g5audit`: Durable audit persistence, SHA-256 hash chaining, tamper detection, redaction, fail-closed, and DB privilege separation (9 DoD invariants).
-  6. `qa/g6enforcement`: 12 DoD scenarios (22 test functions: 12 always-on unit + 10 live-E2E,
-     Scenarios 07/12 have no live counterpart by design), all passing, **including the live-E2E
-     suite against a real Docker topology** — closed 2026-09-21
-     (`docs/PHASES/G6_WORKSTREAMS/CLOSURE_SUMMARY.md` §6). Reproducible by anyone: `deploy/g6/run-e2e-matrix.ps1`
-     runs unedited from a clean checkout, and CI runs the identical script on every push
-     (`.github/workflows/ci.yml`'s `g6-live-e2e` job). Fixing this surfaced and closed two further
-     findings along the way — `deploy/g6/agentgateway.yaml` had no JWT filter at all (no
-     authenticated ALLOW was ever actually possible through this topology before), and a real bug
-     in `internal/authz/adapter.go`'s claim extraction (agentgateway nests JWT claims under a
-     `jwt_payload` key this code didn't know to look inside). Both fixed; see the closure summary
-     for the full trace.
+### 6. Durable & Tamper-Evident Audit Boundary (O-002 Resolved)
+- PostgreSQL append-only `audit_events` persistence (`internal/audit`).
+- Cryptographic SHA-256 row chaining linking each event to its predecessor (`prev_hash` + `row_hash`).
+- Independent out-of-process verification via `agentgate verify-audit --workspace <id>` CLI command.
+- Database trigger `trg_audit_events_immutable` actively rejecting any `UPDATE` or `DELETE` statements.
+- Pre-persistence argument redaction (`redact.go`) ensuring sensitive fields are hashed, never stored in plaintext.
+- Strict audit-before-ALLOW invariant: any failure to persist audit record immediately forces request `DENY`.
 
----
+### 7. Database Privilege Separation
+- `agentgate_migrator`: Dedicated role holding DDL schema privileges (`CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`) used strictly during startup migrations (`agentgate migrate`).
+- `agentgate_app`: Dedicated runtime role holding strictly limited DML privileges (`SELECT`, `INSERT`, `UPDATE` on tables except `audit_events` which is `INSERT`/`SELECT` only).
 
-## Not yet started (The Next Boundaries)
+### 8. Production Deployment Topology & Hardening
+- Complete Docker Compose production stack in `deploy/prod/docker-compose.yml`:
+  - `prod-postgres`: PostgreSQL 16 database.
+  - `prod-keycloak`: Keycloak 26 OIDC server with pre-provisioned `agentgate` realm.
+  - `prod-migrate`: Ephemeral container running database migrations to completion before services start.
+  - `prod-agentgate`: Core governance gateway in hardened distroless container (`gcr.io/distroless/static-debian12:nonroot`).
+  - `prod-agentgateway`: Envoy proxy terminating client TLS and calling AgentGate over mTLS.
+  - `prod-support-desk-mcp`: Realistic demo MCP backend.
+  - `prod-admin-ui`: Production React/Vite admin SPA served by unprivileged Nginx (`nginxinc/nginx-unprivileged:1.27-alpine`).
+  - `prod-demo-agent`: Autonomous traffic generator.
+- Production environment enforcement: zero dev default passwords or secrets permitted (`AGENTGATE_ENV=production` refuses startup if defaults are detected).
 
-- Downstream credential mechanism & token exchange (O-001, Gate G7).
-- Supported MCP revision multi-version matrix (O-004).
-- A realistic (non-toy) demonstration deployment — `deploy/g6/` proves enforcement against a toy
-  `probe-mcp` counter; a real/realistic backend is Gate G7's AI/Gateway-team mandate.
-- Read-only REST APIs for durable audit query and tool-registry listing (Gate G8) — `frontend/app/`'s
-  Audit and Tools screens are intentionally still mock-backed until these exist.
+### 9. Admin UI SPA (`frontend/app/`)
+- React 18, Vite, TypeScript SPA adhering to frozen contract layer (`frontend/src/`).
+- Real Keycloak OIDC login with PKCE flow and token silent renew.
+- Live Policy Lifecycle management (candidate creation, dry-run comparison, zero-downtime activation, rollback).
+- Live Tool Catalog viewer and editor with risk level governance.
+- Live Audit Events viewer with auto-refresh, cursor pagination, and decision filtering.
 
 ---
 
-## Current blockers
+## Verification & Proof Evidence
 
-None active. **G7 is open** with 3 tickets in `docs/PHASES/G7_WORKSTREAMS/` — see above.
+Every claim in this document is backed by reproducible automated test suites:
+
+| Component / Scope | Verification Command / Suite | Result | Proves |
+|---|---|---|---|
+| Core Go Gateway | `go test ./...` in `agentgate/` | 100% PASS (35 packages) | Decision core, audit chaining, OIDC verifier, catalog, rate limit, mTLS config, CLI subcommands |
+| Demo Backend | `go test ./...` in `deploy/demo/support-desk-mcp/` | 100% PASS | In-memory ticket storage, credential signature verification, replay cache, expiry |
+| Traffic Generator | `go test ./...` in `deploy/prod/demo-agent/` | 100% PASS | Scenario executor, traffic generator loop, Keycloak client_credentials auth |
+| Frontend Contract | `npm test` in `frontend/` | 100% PASS (71 tests) | Contract models, state machines, API client mapping |
+| Admin UI SPA | `npm test` & `npm run build` in `frontend/app/` | 100% PASS (87 tests) + dist build | React components, OIDC auth flow, tool catalog editor, audit viewer, Vite bundling |
+| G6 Live Enforcement | `pwsh deploy/g6/run-e2e-matrix.ps1` in sandbox | 100% PASS (12/12 DoD scenarios) | Live agentgateway v1.4.0 proxying, ext_authz gRPC, outage fail-closed, recovery |
+| Realistic Demo E2E | `pwsh deploy/demo/run-demo-e2e.ps1` in sandbox | 100% PASS (13/13 checks) | Ephemeral credential minting, inbound token secrecy, 401 direct access, catalog reclassification |
+| Production Security Gate | `pwsh deploy/prod/scripts/run-security-gate.ps1` in sandbox | 100% PASS (13 clean-room + 17 live scenarios) | Clean-room deploy, OIDC RBAC, mTLS, audit chain verification, live bypass/replay/forgery/outage attacks |
 
 ---
 
-## Open architectural decisions
+## Architectural Decisions Summary
 
 See [`docs/DECISIONS/OPEN_DECISIONS.md`](../DECISIONS/OPEN_DECISIONS.md):
-- **Open:** O-001 (downstream identity), O-004 (supported MCP revision).
-- **Resolved 2026-09-18:** O-009 (production UI framework — `frontend/app/`, `admin-ui/` removed).
-- **Resolved:** O-002 (audit durability, resolved G5), O-003 (gateway conformance, resolved G6), O-005 (tool fingerprinting, resolved G2), O-006 (argument authorization model, resolved G2), O-007 (execution identity, resolved G2/G5), O-008 (ext_authz transport mapping, resolved G6).
+- **Open:** O-004 (supported MCP revision — explicitly pinned to `2026-07-28`).
+- **Resolved:**
+  - **O-001** (downstream credential propagation — AgentGate-minted RS256 scoped JWT with 60s expiry and `jti` replay protection).
+  - **O-002** (audit durability invariant — fail-closed DENY on audit failure).
+  - **O-003** (agentgateway conformance boundary — verified against pinned v1.4.0).
+  - **O-005** (tool identity and schema fingerprinting — canonical SHA-256 fingerprint).
+  - **O-006** (argument authorization model — typed argument declaration whitelist).
+  - **O-007** (AgentGate execution identity — request correlation ID persisted in audit).
+  - **O-008** (ext_authz transport mapping — Envoy v3 gRPC JSON-RPC body mapping).
+  - **O-009** (production UI framework — `frontend/app/` kept, `admin-ui/` consolidated).
 
 ---
 

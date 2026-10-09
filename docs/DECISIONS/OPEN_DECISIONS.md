@@ -1,53 +1,29 @@
 # AgentGate — Open Decisions
 
-**Status:** Active — O-001, O-004 open; O-002, O-003, O-005, O-006, O-007, O-008, O-009 resolved
-**Date:** 2026-08-22 (Updated 2026-09-18)
+**Status:** Active — O-004 open; O-001, O-002, O-003, O-005, O-006, O-007, O-008, O-009 resolved
+**Date:** 2026-10-09
 
 This file contains unresolved questions that may affect architecture or implementation.
 
 An open decision is not an invitation for coding agents to guess.
 
-## O-001 — Downstream identity / credential propagation
-
-**Priority:** Critical
-
-AgentGate must not forward the inbound bearer credential to a downstream MCP resource.
-
-The production mechanism for obtaining a downstream credential that represents the required caller/on-behalf-of identity, audience, lifetime, and permissions is not yet fully designed.
-
-**Current action:** Resolve before production downstream identity implementation.
-
-**Allowed development approach:** Build interfaces and test doubles around the credential boundary without establishing unsafe token-passthrough behavior.
-
 ## O-004 — Supported MCP revision(s)
 
 **Priority:** High
 
-The current Technology Stack Plan targets MCP `2026-07-28`, while compatibility with older deployed clients remains unresolved.
+The current Technology Stack Plan targets MCP `2026-07-28`, while compatibility with older deployed clients remains unresolved. AgentGate v1 explicitly pins and supports MCP revision `2026-07-28`.
 
-**Current action:** Confirm the supported compatibility boundary before finalizing client/backend integration.
-
-## O-005 — Tool identity and schema fingerprint
-
-**Priority:** High
-
-The project needs a precise canonicalization/fingerprinting rule for backend identity + tool name + normalized input schema.
-
-A fingerprint change should cause governance review and deny-by-default behavior for the affected tool until classified.
-
-**Current action:** Design during tool-governance phase.
-
-## O-007 — AgentGate execution identity
-
-**Priority:** Medium/High
-
-Current MCP assumptions about protocol sessions must not be carried into the design if the supported MCP revision is stateless.
-
-AgentGate should own an execution/correlation identifier for audit, future aggregate controls, and request grouping.
-
-**Current action:** Define as part of the request-context model.
+**Current action:** Stays open with pinned revision `2026-07-28` for multi-version matrix evaluation post-v1.
 
 ## Resolved
+
+### O-001 — Downstream identity / credential propagation (resolved 2026-09-29, v1 production)
+
+**Priority was:** Critical
+
+**Resolution:** AgentGate-minted RS256, per-call scoped JWT, jti replay, 60s lifetime, audit ref.
+AgentGate does not forward the caller's inbound bearer token. Instead, upon policy `ALLOW`, AgentGate mints an ephemeral RS256-signed JWT (`internal/credential`) scoped to the specific backend audience and tool call with a 60-second lifetime (`exp`), unique `jti`, and records the SHA-256 reference hash in the immutable audit log (`downstream_credential_ref`). Downstream MCP backends verify signatures via public JWKS (`/.well-known/jwks.json`), enforce audience/expiry, and reject duplicate tokens via an in-memory `jti` replay cache (`support-desk-mcp/credverify.go`).
+Proven by `internal/credential` unit tests, `deploy/demo/support-desk-mcp/credverify.go`, and `agentgate/qa/v1security/security_gate_test.go` Scenarios 01-05 (credential propagation, signature verification, replay rejection, expiry rejection, audience mismatch rejection).
 
 ### O-009 — Production UI framework disposition (resolved 2026-09-18, by consolidation)
 
