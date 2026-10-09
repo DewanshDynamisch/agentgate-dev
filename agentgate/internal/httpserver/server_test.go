@@ -21,6 +21,7 @@ import (
 
 	"github.com/Dynamisch-LLC/agentgate/internal/httpserver"
 	"github.com/Dynamisch-LLC/agentgate/internal/logging"
+	"github.com/Dynamisch-LLC/agentgate/internal/tlsconfig"
 )
 
 func newTestLogger() *slog.Logger {
@@ -191,7 +192,52 @@ func generateSelfSignedCert(t *testing.T, dir string) (certFile, keyFile string,
 	return certFile, keyFile, pemBytes
 }
 
-func TestServerTLS_HTTPServing(t *testing.T) {
+func TestServerTLS_HTTPServingWithSetTLSConfig(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, certPEM := generateSelfSignedCert(t, dir)
+
+	tlsCfg, err := tlsconfig.ServerTLS(certFile, keyFile, "")
+	if err != nil {
+		t.Fatalf("tlsconfig.ServerTLS: %v", err)
+	}
+
+	s := httpserver.New("127.0.0.1:0", newTestLogger())
+	s.SetTLSConfig(tlsCfg)
+	if !s.IsTLS() {
+		t.Fatal("expected IsTLS to be true")
+	}
+
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.Shutdown(ctx)
+	})
+
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(certPEM)
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caPool,
+			},
+		},
+		Timeout: 3 * time.Second,
+	}
+
+	resp, err := client.Get("https://" + s.Addr() + "/healthz")
+	if err != nil {
+		t.Fatalf("GET https://healthz: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestServerTLS_HTTPServingWithSetTLS(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile, certPEM := generateSelfSignedCert(t, dir)
 

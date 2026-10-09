@@ -319,6 +319,9 @@ func (c Config) Validate() error {
 		(strings.TrimSpace(c.AuthzTLSCert) == "" && strings.TrimSpace(c.AuthzTLSKey) != "") {
 		errs = append(errs, fmt.Sprintf("both %sAUTHZ_TLS_CERT and %sAUTHZ_TLS_KEY must be set if either is configured", envPrefix, envPrefix))
 	}
+	if strings.TrimSpace(c.AuthzTLSClientCA) != "" && (strings.TrimSpace(c.AuthzTLSCert) == "" || strings.TrimSpace(c.AuthzTLSKey) == "") {
+		errs = append(errs, fmt.Sprintf("%sAUTHZ_TLS_CLIENT_CA requires both %sAUTHZ_TLS_CERT and %sAUTHZ_TLS_KEY to be set", envPrefix, envPrefix, envPrefix))
+	}
 	if (strings.TrimSpace(c.HTTPTLSCert) != "" && strings.TrimSpace(c.HTTPTLSKey) == "") ||
 		(strings.TrimSpace(c.HTTPTLSCert) == "" && strings.TrimSpace(c.HTTPTLSKey) != "") {
 		errs = append(errs, fmt.Sprintf("both %sHTTP_TLS_CERT and %sHTTP_TLS_KEY must be set if either is configured", envPrefix, envPrefix))

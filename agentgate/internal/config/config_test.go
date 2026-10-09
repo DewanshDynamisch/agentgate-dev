@@ -500,6 +500,20 @@ func TestValidate_PartialTLSConfigRejection(t *testing.T) {
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "HTTP_TLS") {
 		t.Fatalf("expected error for key without cert, got: %v", err)
 	}
+
+	cfg = Config{
+		Environment:      "development",
+		HTTPAddr:         ":8090",
+		AuthzGRPCAddr:    ":9001",
+		ShutdownTimeout:  10 * time.Second,
+		AdminRateLimit:   20,
+		AdminRateBurst:   40,
+		AdminAuthMode:    "static",
+		AuthzTLSClientCA: "/path/to/ca.crt", // client CA set without cert/key
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AUTHZ_TLS_CLIENT_CA requires both") {
+		t.Fatalf("expected error for client CA without cert/key, got: %v", err)
+	}
 }
 
 
