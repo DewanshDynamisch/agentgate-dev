@@ -45,7 +45,16 @@ $adminSecret = (Get-Content (Join-Path $secretsDir "agent_admin_secret") -Raw).T
 $opsCliSecret = (Get-Content (Join-Path $secretsDir "ops_cli_client_secret") -Raw).Trim()
 $adminPw = (Get-Content (Join-Path $secretsDir "admin_initial_password") -Raw).Trim()
 $appPw = (Get-Content (Join-Path $secretsDir "app_password") -Raw).Trim()
-$caFile = "/work/deploy/prod/secrets/ca.crt"
+$repoRoot = Split-Path -Parent (Split-Path -Parent $prodDir)
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "Docker is not available. Please install Docker." -ForegroundColor Red
+    exit 1
+}
+if (-not $repoRoot -or -not (Test-Path (Join-Path $repoRoot "agentgate"))) {
+    Write-Host "Failed to resolve repository root. Expected agentgate directory at: $repoRoot" -ForegroundColor Red
+    exit 1
+}
+$caFile = "/src/deploy/prod/secrets/ca.crt"
 $dbUrl = "postgres://agentgate_app:$appPw@postgres:5432/agentgate_prod_db?sslmode=disable"
 
 # Ensure Keycloak token endpoint is warm and responding
@@ -70,10 +79,11 @@ $testArgs = @(
     "run", "--rm",
     "--network", "agentgate-prod",
     "--add-host", "host.docker.internal:host-gateway",
-    "-v", "/work:/work",
-    "-v", "/root/go/pkg/mod:/go/pkg/mod",
+    "-v", "$($repoRoot):/src",
+    "-v", "agentgate-go-mod:/go/pkg/mod",
+    "-v", "agentgate-go-build:/root/.cache/go-build",
     "-v", "/var/run/docker.sock:/var/run/docker.sock",
-    "-w", "/work/agentgate",
+    "-w", "/src/agentgate",
     "-e", "AGENTGATE_V1_GATEWAY_URL=https://agentgateway:3000",
     "-e", "AGENTGATE_V1_BACKEND_URL=http://support-desk-mcp:9200",
     "-e", "AGENTGATE_V1_KEYCLOAK_URL=https://keycloak:8443",
