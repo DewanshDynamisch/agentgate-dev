@@ -9,8 +9,8 @@ import os from 'node:os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, '../sync-snippets.mjs');
 
-function runSyncSnippets(cwd) {
-  return spawnSync('node', [scriptPath], { cwd, encoding: 'utf8' });
+function runSyncSnippets(cwd, env = {}) {
+  return spawnSync('node', [scriptPath], { cwd, env: { ...process.env, ...env }, encoding: 'utf8' });
 }
 
 test('sync-snippets', async (t) => {
@@ -77,6 +77,15 @@ test('sync-snippets', async (t) => {
   await t.test('is idempotent on second run', () => {
     const res = runSyncSnippets(websiteDir);
     assert.strictEqual(res.status, 0, 'Second run should succeed');
-    // You could test mtime, but simple success is enough for idempotence in this case
+  });
+
+  await t.test('fails if generated content differs from source after stripping (integrity check)', () => {
+    // Force the script to use a fence that is already inside the source content.
+    // sourceContent has ```javascript
+    // So if we force fence to ```, the script's indexOf will find the inner fence,
+    // terminating early, making stripped content differ from source.
+    const res = runSyncSnippets(websiteDir, { TEST_FORCE_FENCE: '```' });
+    assert.strictEqual(res.status, 1, 'Should fail due to integrity check');
+    assert.match(res.stderr, /Integrity check failed/i, 'Should log integrity check failure');
   });
 });

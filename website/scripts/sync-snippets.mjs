@@ -55,13 +55,21 @@ for (const entry of config) {
   const backtickRuns = content.match(/`+/g) || [];
   const maxBackticks = Math.max(0, ...backtickRuns.map((run) => run.length));
   const fenceLength = Math.max(3, maxBackticks + 1);
-  const fence = '`'.repeat(fenceLength);
+  const fence = process.env.TEST_FORCE_FENCE || '`'.repeat(fenceLength);
 
   let mdxContent = `${fence}${language}`;
   if (title) {
     mdxContent += ` title="${title}"`;
   }
   mdxContent += `\n${content}\n${fence}\n`;
+
+  const startIndex = mdxContent.indexOf('\n') + 1;
+  const endIndex = mdxContent.indexOf('\n' + fence + '\n', startIndex);
+  const stripped = mdxContent.substring(startIndex, endIndex);
+  if (stripped !== content) {
+    console.error(`Integrity check failed for ${name}: stripped content differs from source`);
+    process.exit(1);
+  }
 
   const outPath = path.join(outDir, `${name}.mdx`);
   let existingContent = '';
