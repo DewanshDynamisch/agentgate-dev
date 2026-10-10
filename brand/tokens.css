@@ -6,7 +6,7 @@
   --ag-bg-surface: #ffffff;
   --ag-border: #e4e4e7;
   --ag-text-primary: #18181b;
-  --ag-text-secondary: #71717a;
+  --ag-text-secondary: #6e6e76;
   --ag-text-inverse: #ffffff;
   --ag-accent: #4338ca;
   --ag-accent-hover: #3730a3;
@@ -34,7 +34,7 @@
   --ag-allow: #4ade80;
   --ag-allow-soft: #064e3b;
   --ag-deny: #f87171;
-  --ag-deny-soft: #7f1d1d;
+  --ag-deny-soft: #450a0a;
   --ag-candidate: #facc15;
   --ag-candidate-soft: #713f12;
   --ag-font-sans: "Geist", system-ui, -apple-system, sans-serif;
