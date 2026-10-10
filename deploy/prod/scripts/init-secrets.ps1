@@ -112,9 +112,8 @@ if (-not (Test-Path $jwksFile)) {
 }
 
 # 7. Ensure permissions: files readable by non-root containers (chmod 644)
-Get-ChildItem -Path $secretsDir -File | ForEach-Object {
-    & chmod 644 $_.FullName 2>$null
-}
+Write-Host "  Applying permissions to secrets using Docker..." -ForegroundColor Yellow
+docker run --rm -v "${secretsDir}:/sec" alpine sh -c "chmod 644 /sec/*" | Out-Null
 
 # 8. Render .env from .env.example
 if (-not (Test-Path $envFile)) {
