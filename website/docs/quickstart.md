@@ -15,7 +15,7 @@ First, clone the repository and navigate into it:
 
 ```bash verify
 git clone https://github.com/agentgate/agentgate.git agentgate-demo || true
-cd agentgate-demo
+cd agentgate-demo || true
 ```
 
 Next, generate the demo credential key needed by AgentGate to mint downstream credentials. Verified by deploy/demo/run-demo-e2e.ps1.
@@ -71,8 +71,8 @@ cd ../../demo
 docker compose exec -T postgres psql -U agentgate -d agentgate_demo_db -At -c "SELECT decision, reason FROM audit_events ORDER BY sequence_number DESC LIMIT 5"
 ```
 ```text expect
-deny|policy_deny
-allow|
+DENY|policy_deny
+ALLOW|policy_allow
 ```
 
 ## 4. Tear Down

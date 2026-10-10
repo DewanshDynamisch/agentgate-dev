@@ -1,37 +1,21 @@
 #!/usr/bin/env node
 /**
- * verify-quickstart.mjs — Run every `verify` code fence from a quickstart
+ * verify-quickstart.mjs - Run every `verify` code fence from a quickstart
  * markdown document in a single bash shell session and report pass/fail.
- *
- * Usage:
- *   node verify-quickstart.mjs --file <path-to-markdown> [--with-stack]
- *
- * Options:
- *   --file <path>   Path to the markdown file containing `verify` fences.
- *   --with-stack    Run the teardown/last block even if an earlier block fails.
- *
- * Exit codes:
- *   0  All blocks passed (including all expect assertions).
- *   1  At least one block failed, a missing expected substring, or zero blocks.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 import { extractVerifyBlocks } from './lib/fences.mjs';
-
-// ---------------------------------------------------------------------------
-// Argument parsing
-// ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
 
 function printUsage() {
-  process.stderr.write(
-    'Usage: node verify-quickstart.mjs --file <path-to-markdown> [--with-stack]\n'
-  );
+  process.stderr.write('Usage: node verify-quickstart.mjs --file <path> [--with-stack]\n');
 }
 
 const fileIndex = args.indexOf('--file');
@@ -48,73 +32,13 @@ if (!fs.existsSync(mdPath)) {
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// JWT masking
-// ---------------------------------------------------------------------------
-
-/**
- * Regex that matches strings of the form header.payload.signature where each
- * part is a base64url-encoded segment (A-Za-z0-9_- and =).  The header and
- * payload must be at least 10 chars; the signature at least 4.
- *
- * This intentionally matches syntactically JWT-shaped tokens without
- * validating the content, so we catch real-looking tokens in command output.
- */
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
-/**
- * Replace JWT-shaped tokens in a string with "[REDACTED]".
- * @param {string} s
- * @returns {string}
- */
 function maskJwt(s) {
   return s.replace(JWT_RE, '[REDACTED]');
 }
 
-// ---------------------------------------------------------------------------
-// Shell execution
-// ---------------------------------------------------------------------------
-
-/**
- * Run a command string in bash (single session via stdin pipe).
- * Returns { exitCode, stdout, stderr }.
- *
- * We run each block as a separate bash invocation but with `set -e` so that
- * any command failure propagates the exit code.  For a true single-session
- * approach, state (e.g. `cd`) would be lost between blocks.  To preserve
- * working-directory and exported variables across blocks we write all
- * commands to a temporary shell script and run it; however the plan says
- * "one bash shell session", which we implement here by running bash with the
- * command passed via stdin so each block in the session still gets a fresh
- * process but cd changes won't persist.  The plan examples use relative paths
- * that assume a starting cwd = repo root.
- *
- * We use the working dir = repo root (resolved from this script's location).
- */
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
-
-function runBlock(command) {
-  // On Windows, bash may not be available. We attempt bash first (WSL/Git Bash),
-  // then fall back to cmd /C for simple commands if bash is absent.
-  // The plan notes: "bash; working dir = repo root".
-  const result = spawnSync('bash', ['-c', command], {
-    cwd: REPO_ROOT,
-    encoding: 'utf8',
-    stdio: 'pipe',
-    shell: false,
-    timeout: 120_000, // 2 minutes per block
-  });
-
-  const stdout = result.stdout || '';
-  const stderr = result.stderr || '';
-  const exitCode = result.status !== null ? result.status : (result.error ? 1 : 0);
-
-  return { exitCode, stdout, stderr };
-}
-
-// ---------------------------------------------------------------------------
-// Table printer
-// ---------------------------------------------------------------------------
 
 const COL_INDEX = 8;
 const COL_STATUS = 8;
@@ -128,10 +52,7 @@ function pad(s, n) {
 
 function printTableHeader() {
   process.stdout.write(
-    pad('Block', COL_INDEX) +
-    pad('Status', COL_STATUS) +
-    pad('Command', COL_COMMAND) +
-    'Detail\n'
+    pad('Block', COL_INDEX) + pad('Status', COL_STATUS) + pad('Command', COL_COMMAND) + 'Detail\n'
   );
   process.stdout.write('-'.repeat(COL_INDEX + COL_STATUS + COL_COMMAND + COL_DETAIL) + '\n');
 }
@@ -139,16 +60,9 @@ function printTableHeader() {
 function printTableRow(index, status, command, detail) {
   const shortCmd = command.split('\n')[0].slice(0, COL_COMMAND - 1);
   process.stdout.write(
-    pad(`#${index}`, COL_INDEX) +
-    pad(status, COL_STATUS) +
-    pad(shortCmd, COL_COMMAND) +
-    String(detail || '').slice(0, COL_DETAIL) + '\n'
+    pad(`#${index}`, COL_INDEX) + pad(status, COL_STATUS) + pad(shortCmd, COL_COMMAND) + String(detail || '').slice(0, COL_DETAIL) + '\n'
   );
 }
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
 
 const markdown = fs.readFileSync(mdPath, 'utf8');
 let blocks;
@@ -160,9 +74,7 @@ try {
 }
 
 if (blocks.length === 0) {
-  process.stderr.write(
-    `Error: zero verify blocks found in ${mdPath}. Refusing to pass with no checks.\n`
-  );
+  process.stderr.write(`Error: zero verify blocks found in ${mdPath}. Refusing to pass with no checks.\n`);
   process.exit(1);
 }
 
@@ -172,30 +84,100 @@ printTableHeader();
 let overallPass = true;
 let failedAt = -1;
 
+const tmpDir = path.join(REPO_ROOT, '.ag-verify-tmp');
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+let scriptContent = '#!/bin/bash\nset -e\nexport GIT_TERMINAL_PROMPT=0\nexport GCM_INTERACTIVE=false\nexport GIT_ASKPASS=echo\nexport GCM_PROVIDER=empty\ngo() { go.exe "$@"; }\nexport -f go\nAG_VERIFY_DIR="$(pwd)/.ag-verify-tmp"\n';
+
 for (const block of blocks) {
-  // Skip remaining blocks after a failure (unless --with-stack for last block)
+  const cmd = block.command.replace(/\r/g, '');
+  scriptContent += `
+echo ":::AG_BLOCK ${block.index}"
+{
+${cmd}
+} > "$AG_VERIFY_DIR/out${block.index}" 2>&1
+echo ":::AG_EXIT ${block.index} \$?"
+`;
+}
+
+fs.writeFileSync('.ag-verify-tmp/runner.sh', scriptContent);
+const result = spawnSync('bash', ['.ag-verify-tmp/runner.sh'], {
+  cwd: REPO_ROOT,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+  shell: false,
+  timeout: 120_000,
+});
+
+const runnerStdout = result.stdout || '';
+console.log("==> RUNNER STDOUT START\\n" + runnerStdout + "\\n==> RUNNER STDOUT END");
+
+const startedBlocks = new Set();
+const finishedBlocks = new Map();
+
+for (const line of runnerStdout.split('\n')) {
+  if (line.startsWith(':::AG_BLOCK ')) {
+    startedBlocks.add(parseInt(line.split(' ')[1]));
+  }
+  if (line.startsWith(':::AG_EXIT ')) {
+    const parts = line.split(' ');
+    finishedBlocks.set(parseInt(parts[1]), parseInt(parts[2]));
+  }
+}
+
+for (const block of blocks) {
   if (failedAt !== -1) {
     const isLastBlock = block.index === blocks.length - 1;
     if (withStack && isLastBlock) {
-      // Run the teardown block anyway
+      // Need to run the teardown block separately because the script aborted
+      const teardownCmd = block.command.replace(/\r\n/g, '\n');
+      const tdRes = spawnSync('bash', ['-c', teardownCmd], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        shell: false
+      });
+      const combinedOutput = maskJwt((tdRes.stdout||'') + (tdRes.stderr||''));
+      if (tdRes.status !== 0) {
+        overallPass = false;
+        printTableRow(block.index, 'FAIL', block.command, `exit ${tdRes.status}`);
+      } else {
+        printTableRow(block.index, 'PASS', block.command, '');
+      }
+      continue;
     } else {
       printTableRow(block.index, 'SKIP', block.command, 'skipped after failure');
       continue;
     }
   }
 
-  const { exitCode, stdout, stderr } = runBlock(block.command);
-  const combinedOutput = maskJwt(stdout + stderr);
+  const outPath = path.join(tmpDir, `out${block.index}`);
+  let combinedOutput = '';
+  if (fs.existsSync(outPath)) {
+    combinedOutput = fs.readFileSync(outPath, 'utf8');
+  }
+  combinedOutput = maskJwt(combinedOutput);
+
+  if (!startedBlocks.has(block.index)) {
+    overallPass = false;
+    failedAt = block.index;
+    printTableRow(block.index, 'FAIL', block.command, `did not run`);
+    continue;
+  }
+
+  let exitCode = 1;
+  if (finishedBlocks.has(block.index)) {
+    exitCode = finishedBlocks.get(block.index);
+  }
 
   if (exitCode !== 0) {
     overallPass = false;
-    if (failedAt === -1) failedAt = block.index;
+    failedAt = block.index;
     printTableRow(block.index, 'FAIL', block.command, `exit ${exitCode}`);
     process.stdout.write(`  Output: ${combinedOutput.slice(0, 200)}\n`);
     continue;
   }
 
-  // Check expect substrings
   let expectFail = null;
   for (const substring of block.expect) {
     if (!combinedOutput.includes(substring)) {
@@ -206,9 +188,9 @@ for (const block of blocks) {
 
   if (expectFail !== null) {
     overallPass = false;
-    if (failedAt === -1) failedAt = block.index;
+    failedAt = block.index;
     printTableRow(block.index, 'FAIL', block.command, `missing: "${expectFail}"`);
-    process.stdout.write(`  Output: ${maskJwt(combinedOutput).slice(0, 400)}\n`);
+    process.stdout.write(`  Output: ${combinedOutput.slice(0, 400)}\n`);
     continue;
   }
 
