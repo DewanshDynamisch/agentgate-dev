@@ -736,17 +736,23 @@ func bootstrapDefaultPolicy(ctx context.Context, policyMgr *policymanager.Manage
 
 	// 2. If no active engine loaded, and store has no active policy, seed baseline
 	// Check if store has active policy for default
-	if _, err := policyMgr.Store().GetActivePolicy(ctx, "default"); errors.Is(err, policystore.ErrNoActivePolicy) {
-		if _, err := policyMgr.CreateCandidateWithVersion(ctx, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy"); err == nil {
-			if _, err := policyMgr.Activate(ctx, "default", "v1.0.0"); err == nil {
-				logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
-			}
-		} else if errors.Is(err, policystore.ErrAlreadyExists) {
-			// If it already existed but wasn't active, just activate it
-			if _, err := policyMgr.Activate(ctx, "default", "v1.0.0"); err == nil {
-				logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
-			}
+	_, err := policyMgr.Store().GetActivePolicy(ctx, "default")
+	if err != nil && !errors.Is(err, policystore.ErrNoActivePolicy) {
+		logger.Error("failed to get active policy during bootstrap", "error", err)
+		return fmt.Errorf("get active policy: %w", err)
+	}
+
+	if errors.Is(err, policystore.ErrNoActivePolicy) {
+		_, err := policyMgr.CreateCandidateWithVersion(ctx, "default", "v1.0.0", fixturepolicy.CedarSource, "default baseline policy")
+		if err != nil && !errors.Is(err, policystore.ErrAlreadyExists) {
+			logger.Error("failed to create baseline policy candidate", "error", err)
 		}
+
+		if _, err := policyMgr.Activate(ctx, "default", "v1.0.0"); err != nil {
+			logger.Error("failed to activate baseline policy", "error", err)
+			return fmt.Errorf("activate baseline policy: %w", err)
+		}
+		logger.Info("seeded active baseline policy v1.0.0 for workspace 'default'")
 	}
 	return nil
 }

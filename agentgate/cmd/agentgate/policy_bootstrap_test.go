@@ -130,6 +130,24 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 			wantVersion: "v2",
 			wantEvents: 0,
 		},
+		{
+			name: "GetActivePolicy error propagates",
+			setupStore: func(t *testing.T) policystore.Store {
+				return &errorStore{Store: policystore.NewMemoryStore()}
+			},
+			wantErr: true,
+			wantVersion: "",
+			wantEvents: 0,
+		},
+		{
+			name: "Activate error propagates",
+			setupStore: func(t *testing.T) policystore.Store {
+				return &activateErrorStore{Store: policystore.NewMemoryStore()}
+			},
+			wantErr: true,
+			wantVersion: "",
+			wantEvents: 1, // CreateCandidate succeeds, Activate fails
+		},
 	}
 
 	for _, tt := range tests {
@@ -172,4 +190,21 @@ func (c *corruptStore) GetActivePolicy(ctx context.Context, workspaceID string) 
 		Content:     "invalid cedar",
 		State:       policystore.StateActive,
 	}, nil
+}
+
+type errorStore struct {
+	policystore.Store
+}
+func (e *errorStore) GetActivePolicy(ctx context.Context, workspaceID string) (policystore.PolicyRecord, error) {
+	return policystore.PolicyRecord{}, os.ErrPermission // Some generic error
+}
+
+type activateErrorStore struct {
+	policystore.Store
+}
+func (e *activateErrorStore) GetActivePolicy(ctx context.Context, workspaceID string) (policystore.PolicyRecord, error) {
+	return policystore.PolicyRecord{}, policystore.ErrNoActivePolicy
+}
+func (e *activateErrorStore) ActivatePolicy(ctx context.Context, workspaceID, version string) (string, error) {
+	return "", os.ErrPermission
 }
