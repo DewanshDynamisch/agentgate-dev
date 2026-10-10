@@ -4,7 +4,8 @@ sidebar_position: 4
 
 # Identity
 
-AgentGate receives an inbound identity that has been validated by the gateway. AgentGate does not validate the raw token; it reads fields according to its configuration.
+AgentGate receives an inbound identity that has been validated by the gateway. Verified by docs/SECURITY/PRODUCTION-INVARIANTS.md.
+AgentGate does not validate the raw token; it reads fields according to its configuration. Verified by agentgate/internal/identity/mapper.go.
 
 ## Keycloak Realm Roles and Agents
 The production deployment uses a Keycloak realm named `agentgate`. Verified by deploy/prod/keycloak/realm-agentgate.json.
