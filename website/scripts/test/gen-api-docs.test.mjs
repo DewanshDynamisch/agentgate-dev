@@ -13,6 +13,7 @@ const SCRIPT = path.join(ROOT, 'website/scripts/gen-api-docs.mjs');
 describe('gen-api-docs', () => {
     const tmpSpec = path.join(ROOT, 'website/scripts/test/fixtures/openapi.yaml');
     const outDir = path.join(ROOT, 'website/docs/_generated/api');
+    const realSpec = path.join(ROOT, 'agentgate/internal/apidocs/openapi.yaml');
 
     before(async () => {
         await fs.mkdir(path.dirname(tmpSpec), { recursive: true });
@@ -43,37 +44,46 @@ paths: {}
         }, /zero operations/i);
     });
 
-    test('generated operation count equals paths*methods and paths appear', async () => {
-        const specContent = `
-openapi: 3.0.0
-info:
-  title: API
-  version: 1.0.0
-paths:
-  /test/1:
-    get:
-      tags: [tests]
-      summary: Get test 1
-    post:
-      tags: [tests]
-      summary: Post test 1
-  /untagged/2:
-    put:
-      summary: Untagged put
-`;
-        await fs.writeFile(tmpSpec, specContent);
-        
-        execSync(`node "${SCRIPT}" "${tmpSpec}" "${outDir}"`, { stdio: 'pipe' });
+    test('generated operation count equals paths*methods and paths appear in generated files', async () => {
+        // Clear outDir
+        await fs.rm(outDir, { recursive: true, force: true });
+        await fs.mkdir(outDir, { recursive: true });
 
-        const testsPage = await fs.readFile(path.join(outDir, 'tests.mdx'), 'utf8');
-        const untaggedPage = await fs.readFile(path.join(outDir, 'untagged.mdx'), 'utf8');
-        const indexPage = await fs.readFile(path.join(outDir, 'index.mdx'), 'utf8');
+        // Run against the real spec file instead of a hardcoded mock
+        execSync(`node "${SCRIPT}" "${realSpec}" "${outDir}"`, { stdio: 'pipe' });
 
-        // Total 3 ops
-        assert.match(testsPage, /\/test\/1/);
-        assert.match(untaggedPage, /\/untagged\/2/);
+        const specContent = await fs.readFile(realSpec, 'utf8');
+        const parsedYaml = yaml.parse(specContent);
         
-        assert.match(indexPage, /tests/);
-        assert.match(indexPage, /untagged/);
+        let expectedCount = 0;
+        const expectedPaths = new Set();
+        
+        for (const [pathStr, methods] of Object.entries(parsedYaml.paths)) {
+            for (const method of Object.keys(methods)) {
+                if (method !== 'parameters') {
+                    expectedCount++;
+                    expectedPaths.add(pathStr);
+                }
+            }
+        }
+
+        const files = await fs.readdir(outDir);
+        let actualCount = 0;
+        let allOutput = '';
+
+        for (const file of files) {
+            if (file.endsWith('.mdx')) {
+                const content = await fs.readFile(path.join(outDir, file), 'utf8');
+                actualCount += (content.match(/\*\*Method:\*\*/g) || []).length;
+                allOutput += content + '\n';
+            }
+        }
+        
+        assert.strictEqual(actualCount, expectedCount, 'Generated operation count must equal the number of (path, method) pairs in the YAML');
+
+        for (const pathStr of expectedPaths) {
+            const escapedPath = pathStr.replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+            assert.ok(allOutput.includes(escapedPath), `Path ${pathStr} should appear in the generated pages`);
+        }
     });
 });

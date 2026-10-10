@@ -132,7 +132,7 @@ async function main() {
 
     for (const [tag, ops] of groups.entries()) {
         const slug = tag.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        let content = `# ${tag} API\n\n`;
+        let content = `# ${tag} API {#${slug}-api}\n\n`;
 
         for (const op of ops) {
             content += `## ${escapeMdx(op.summary || op.path)}\n\n`;
@@ -151,12 +151,20 @@ async function main() {
     }
 
     let indexContent = `# API Reference\n\n`;
+    let importStatements = '';
+    let componentUsage = '';
+
     for (const tag of Array.from(groups.keys()).sort()) {
         const slug = tag.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        indexContent += `- [${tag}](./${slug})\n`;
+        const ComponentName = slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-([a-z])/g, g => g[1].toUpperCase());
+        
+        indexContent += `- [${tag}](#${slug}-api)\n`;
+        importStatements += `import ${ComponentName} from './${slug}.mdx';\n`;
+        componentUsage += `<${ComponentName} />\n\n`;
     }
 
-    await fs.writeFile(path.join(outDir, `index.mdx`), indexContent);
+    const finalIndex = `${importStatements}\n${indexContent}\n${componentUsage}`;
+    await fs.writeFile(path.join(outDir, `index.mdx`), finalIndex);
 }
 
 main().catch(err => {
