@@ -5,7 +5,7 @@ export default function Hero() {
   return (
     <header id="hero" className={styles.heroSection}>
       <div className="container">
-        <h1 className={styles.title}>AgentGate</h1>
+        <h1 id="hero-title" className={styles.title}>AgentGate</h1>
         <p className={styles.tagline}>
           A checkpoint in the only path between an AI agent and its tools.
         </p>

@@ -6,6 +6,7 @@ export default function Trust() {
     <section id="trust" className={styles.section}>
       <div className="container">
         <h2>Designed for Zero Trust</h2>
+        <div className="ag-trust-badge"></div>
         <div className={styles.grid}>
           <div className={styles.card}>
             <h3>Fails Closed</h3>

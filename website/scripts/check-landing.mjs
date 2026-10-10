@@ -7,6 +7,14 @@ export function checkLanding(html) {
     const h1Count = (html.match(/<h1\b[^>]*>/g) || []).length;
     if (h1Count !== 1) {
         errors.push(`Expected exactly one <h1>, found ${h1Count}`);
+    } else {
+        if (!/<h1[^>]*id=["']hero-title["'][^>]*>/.test(html)) {
+            errors.push(`<h1> is missing id="hero-title"`);
+        }
+    }
+
+    if (!/class(Name)?=["'][^"']*ag-trust-badge[^"']*["']/.test(html)) {
+        errors.push(`Missing ag-trust-badge`);
     }
 
     const requiredSections = ['hero', 'problem', 'how-it-works', 'see-it-block', 'console', 'trust', 'quickstart'];

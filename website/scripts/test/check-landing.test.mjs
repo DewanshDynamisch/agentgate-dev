@@ -15,7 +15,8 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
             <meta property="og:image" content="static/img/og.png">
         </head>
         <body>
-            <h1>One H1</h1>
+            <h1 id="hero-title">One H1</h1>
+            <div class="ag-trust-badge"></div>
             <div id="hero"></div>
             <div id="problem"></div>
             <div id="how-it-works"></div>
@@ -33,11 +34,23 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
     });
 
     await t.test('fails if not exactly one h1', () => {
-        const html0 = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div>`;
+        const html0 = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div><div class="ag-trust-badge"></div>`;
         assert.ok(checkLanding(html0).some(e => e.includes('exactly one <h1>')));
 
-        const html2 = `<h1>A</h1><h1>B</h1>` + html0;
+        const html2 = `<h1 id="hero-title">A</h1><h1>B</h1>` + html0;
         assert.ok(checkLanding(html2).some(e => e.includes('exactly one <h1>')));
+    });
+
+    await t.test('fails if missing hero-title id', () => {
+        const html = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><h1>H1</h1><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div><div class="ag-trust-badge"></div>`;
+        const errors = checkLanding(html);
+        assert.ok(errors.some(e => e.includes('missing id="hero-title"')));
+    });
+
+    await t.test('fails if missing ag-trust-badge', () => {
+        const html = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><h1 id="hero-title">H1</h1><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div>`;
+        const errors = checkLanding(html);
+        assert.ok(errors.some(e => e.includes('Missing ag-trust-badge')));
     });
 
     await t.test('fails if missing sections', () => {
