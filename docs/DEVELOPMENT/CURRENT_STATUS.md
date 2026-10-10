@@ -14,8 +14,8 @@ AgentGate v1 Production Readiness (all 25 planned implementation and verificatio
 Every subsystem, security boundary, and operational requirement defined in `docs/superpowers/plans/2026-09-29-agentgate-v1-production.md` has been implemented, tested, and verified against running container topologies:
 
 - **CI pipeline configured:** 7 automated jobs defined in `.github/workflows/ci.yml` (`go`, `demo-module-tests`, `frontend`, `images`, `g6-live-e2e`, `demo-live-e2e`, `v1-security-gate`). GitHub CI not yet run.
-- **Definitive operator runbook:** 12 verified operational runbook procedures documented in `docs/OPERATIONS/RUNBOOK.md`.
-- **Zero critical or high security defects:** Live 17-scenario security gate suite (`qa/v1security`) passed in the Docker sandbox on 2026-10-09, run 3 times; GitHub CI not yet run.
+- **Definitive operator runbook:** 12 operational runbook procedures documented in `docs/OPERATIONS/RUNBOOK.md`.
+- **no known critical or high defects found by the 17-scenario live gate, which passed 3 consecutive from-scratch runs in the Docker sandbox on 2026-10-09; known limitations are listed in the runbook; GitHub CI has not run.**
 
 ### Checkpoint Milestones
 
@@ -39,7 +39,7 @@ Every subsystem, security boundary, and operational requirement defined in `docs
 - Pinned `agentgateway:v1.4.0` (`sha256:771afaf093065477fa296eb90dcb618a0300165f12a32f80bbdd1427fab900ec`).
 - Communicates with AgentGate via Envoy v3 gRPC `envoy.service.auth.v3.Authorization/Check` on port `:9001` over mutual TLS (`internal/tlsconfig` with client certificate verification).
 - Inbound JSON-RPC 2.0 `tools/call` bodies are extracted from `AttributeContext_HttpRequest` up to 1 MiB (`maxRequestBytes: 1048576`).
-- Fail-closed behavior verified empirically: any failure (outage, policy deny, malformed payload, schema drift, unauthenticated token) results in `DENY` with 0 calls forwarded to the downstream backend.
+- Fail-closed behavior implemented: any failure (outage, policy deny, malformed payload, schema drift, unauthenticated token) results in `DENY` with 0 calls forwarded to the downstream backend.
 
 ### 2. Cedar Authorization Core
 - Pinned `cedar-go v1.8.0` encapsulated entirely within `internal/policy` (zero Cedar imports elsewhere).
