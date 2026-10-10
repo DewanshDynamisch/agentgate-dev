@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './Hero.module.css';
+import FlowAnimation from './FlowAnimation';
 
 export default function Hero() {
   return (
@@ -23,7 +24,7 @@ export default function Hero() {
         
         {/* Slot for flow animation (Task 5) */}
         <div className={styles.animationSlot}>
-          {/* FlowAnimation goes here */}
+          <FlowAnimation />
         </div>
       </div>
     </header>

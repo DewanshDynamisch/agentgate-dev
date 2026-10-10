@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-export function checkLanding(html) {
+export function checkLanding(html, css = '') {
     const errors = [];
 
     const h1Count = (html.match(/<h1\b[^>]*>/g) || []).length;
@@ -59,6 +59,17 @@ export function checkLanding(html) {
         }
     }
 
+    // Flow animation tests
+    if (!/<[^>]*role=["']img["'][^>]*aria-label=["'][^"']+["'][^>]*>/.test(html) && !/<[^>]*aria-label=["'][^"']+["'][^>]*role=["']img["'][^>]*>/.test(html)) {
+        errors.push('Missing animation element with role="img" and non-empty aria-label');
+    }
+    if (!/<button[^>]*>.*?Pause.*?<\/button>/i.test(html) && !/<button[^>]*aria-label=["'][^"']*Pause[^"']*["'][^>]*>/i.test(html)) {
+        errors.push('Missing pause button');
+    }
+    if (!/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)[\s\S]*?animation\s*:\s*none/i.test(css)) {
+        errors.push('Missing CSS prefers-reduced-motion rule that disables animation');
+    }
+
     return errors;
 }
 
@@ -74,7 +85,17 @@ if (isMain) {
         process.exit(1);
     }
     const html = fs.readFileSync(htmlPath, 'utf8');
-    const errors = checkLanding(html);
+
+    let combinedCss = '';
+    const cssDir = path.resolve('build', 'assets', 'css');
+    if (fs.existsSync(cssDir)) {
+        const cssFiles = fs.readdirSync(cssDir).filter(f => f.endsWith('.css'));
+        for (const file of cssFiles) {
+            combinedCss += fs.readFileSync(path.join(cssDir, file), 'utf8') + '\n';
+        }
+    }
+
+    const errors = checkLanding(html, combinedCss);
     if (errors.length > 0) {
         console.error('Landing page checks failed:');
         errors.forEach(e => console.error(`- ${e}`));

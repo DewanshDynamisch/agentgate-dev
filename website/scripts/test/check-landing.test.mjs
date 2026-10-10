@@ -26,10 +26,13 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
             <div id="quickstart"></div>
             <a href="/docs">Docs</a>
             <img src="foo.png" alt="bar" />
+            <div role="img" aria-label="Request flow animation"></div>
+            <button aria-label="Pause animation"></button>
         </body>
         </html>
         `;
-        const errors = checkLanding(html);
+        const css = `@media (prefers-reduced-motion: reduce) { .animation { animation: none; } }`;
+        const errors = checkLanding(html, css);
         assert.deepEqual(errors, []);
     });
 
@@ -79,5 +82,23 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
         <img src="foo.png" />`;
         const errors = checkLanding(html);
         assert.ok(errors.some(e => e.includes('<img> without alt')));
+    });
+
+    await t.test('fails if missing flow animation requirements', () => {
+        const html = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><h1 id="hero-title">H1</h1><div class="ag-trust-badge"></div><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div>`;
+        const errors = checkLanding(html, '');
+        assert.ok(errors.some(e => e.includes('Missing animation element with role="img" and non-empty aria-label')));
+        assert.ok(errors.some(e => e.includes('Missing pause button')));
+        assert.ok(errors.some(e => e.includes('Missing CSS prefers-reduced-motion rule')));
+    });
+
+    await t.test('passes with flow animation requirements', () => {
+        const html = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><h1 id="hero-title">H1</h1><div class="ag-trust-badge"></div><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div>
+        <div role="img" aria-label="Request flow animation"></div>
+        <button aria-label="Pause animation"></button>
+        `;
+        const css = `@media (prefers-reduced-motion: reduce) { .animation { animation: none; } }`;
+        const errors = checkLanding(html, css);
+        assert.deepEqual(errors, []);
     });
 });
