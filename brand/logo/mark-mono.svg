@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>AgentGate Mark (Monochrome)</title>
+  <rect x="12" y="12" width="40" height="40" rx="8" fill="none" stroke="#18181b" stroke-width="4"/>
+  <path d="M12 32h16M36 32h16" stroke="#18181b" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="8" fill="#18181b"/>
+</svg>
