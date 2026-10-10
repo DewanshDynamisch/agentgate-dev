@@ -1,7 +1,7 @@
 # AgentGate
 
 ![Go Version](https://img.shields.io/badge/go-1.25.0-blue)
-![CI Status](https://img.shields.io/badge/CI-TBD-lightgrey)
+[![CI](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml)
 ![Licence](https://img.shields.io/badge/licence-TBD-lightgrey)
 
 **A checkpoint in the only path between an AI agent and its tools.**
@@ -20,9 +20,9 @@
 
 ## Quickstart (5-minute Demo)
 Want to see it in action? See the [Quickstart Guide](website/docs/quickstart.md) or run the one-command demo mode:
-\\\ash
+```ash
 ./deploy/prod/scripts/demo-mode.ps1
-\\\
+```
 
 ## Documentation
 - [Known Limitations](docs/OPERATIONS/RUNBOOK.md#known-v1-limitations)
