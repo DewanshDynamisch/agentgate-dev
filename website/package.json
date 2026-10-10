@@ -10,7 +10,7 @@
     "test": "node --test scripts/test/*.test.mjs",
     "check:offline": "node scripts/check-offline.mjs build",
     "prebuild": "node scripts/sync-snippets.mjs && node scripts/sync-limitations.mjs && node scripts/gen-api-docs.mjs",
-    "prestart": "node scripts/sync-snippets.mjs && node scripts/gen-api-docs.mjs"
+    "prestart": "node scripts/sync-snippets.mjs && node scripts/sync-limitations.mjs && node scripts/gen-api-docs.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
