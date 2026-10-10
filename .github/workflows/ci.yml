@@ -260,3 +260,51 @@ jobs:
         if: always()
         shell: bash
         run: docker compose -f deploy/prod/docker-compose.yml down -v
+
+  website:
+    name: Website validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+      - name: Build
+        working-directory: website
+        run: npm run build
+      - name: Typecheck
+        working-directory: website
+        run: npm run typecheck
+      - name: Test
+        working-directory: website
+        run: npm test
+      - name: Check offline
+        working-directory: website
+        run: npm run check:offline
+      - name: Check landing
+        working-directory: website
+        run: npm run check-landing
+      - name: Tools tests
+        run: node --test tools/test/*.test.mjs
+      - name: Brand tokens parity check
+        run: node tools/check-brand-tokens.mjs --files brand/tokens.css frontend/app/src/styles/tokens.css website/src/css/tokens.css
+      - name: SVG hygiene check
+        run: node tools/check-svg.mjs brand
+
+  docs-quickstart:
+    name: Docs Quickstart Verifier
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run quickstart verifier
+        run: node website/scripts/verify-quickstart.mjs --file website/docs/quickstart.md --with-stack
