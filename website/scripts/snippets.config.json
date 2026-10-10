@@ -1,0 +1,20 @@
+[
+  {
+    "name": "agentgateway-config",
+    "source": "deploy/demo/agentgateway.yaml",
+    "language": "yaml",
+    "title": "deploy/demo/agentgateway.yaml"
+  },
+  {
+    "name": "demo-compose",
+    "source": "deploy/demo/docker-compose.yml",
+    "language": "yaml",
+    "title": "deploy/demo/docker-compose.yml"
+  },
+  {
+    "name": "tools-bootstrap",
+    "source": "deploy/shared/tools.bootstrap.json",
+    "language": "json",
+    "title": "deploy/shared/tools.bootstrap.json"
+  }
+]

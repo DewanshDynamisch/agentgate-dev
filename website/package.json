@@ -8,7 +8,9 @@
     "serve": "docusaurus serve",
     "typecheck": "tsc",
     "test": "node --test scripts/test/*.test.mjs",
-    "check:offline": "node scripts/check-offline.mjs build"
+    "check:offline": "node scripts/check-offline.mjs build",
+    "prebuild": "node scripts/sync-snippets.mjs",
+    "prestart": "node scripts/sync-snippets.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
