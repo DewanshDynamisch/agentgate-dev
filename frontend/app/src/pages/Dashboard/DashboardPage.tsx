@@ -8,6 +8,7 @@ import type { AuditEvent } from "@contract/models/audit";
 import { toLifecycleSummaryView } from "@contract/view/policy-lifecycle-view";
 import { StatusDot, type StatusTone } from "../../components/ui/StatusDot";
 import type { PolicyRecord } from "@contract/models/governance";
+import { usePageTitle } from "../../lib/usePageTitle";
 
 const STATE_TONE: Record<PolicyRecord["state"], StatusTone> = {
   active: "allow",
@@ -27,6 +28,7 @@ function formatHour(iso: string): string {
 }
 
 export function DashboardPage() {
+  usePageTitle("Dashboard");
   const { state, ready } = useGovernance();
   const { client, workspaceId } = useGovernanceClient();
   const [events, setEvents] = useState<AuditEvent[]>([]);

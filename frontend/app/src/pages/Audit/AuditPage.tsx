@@ -6,6 +6,7 @@ import { CopyableValue } from "../../components/ui/CopyableValue";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { TableSkeleton } from "../../components/ui/Skeleton";
 import type { AuditEvent } from "@contract/models/audit";
+import { usePageTitle } from "../../lib/usePageTitle";
 
 const PAGE_SIZE = 50;
 const REFRESH_INTERVAL_MS = 5000;

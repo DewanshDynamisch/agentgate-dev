@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePageTitle } from '../../lib/usePageTitle';
 import { Wrench } from "lucide-react";
 import type { ToolDefinition } from "@contract/models/tools";
 import { useGovernanceClient } from "../../state/GovernanceProvider";
@@ -29,6 +30,7 @@ type DialogState =
   | { kind: "delete"; tool: ToolDefinition };
 
 export function ToolsPage() {
+  usePageTitle('Tools');
   const { client } = useGovernanceClient();
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [loading, setLoading] = useState(true);
