@@ -1,0 +1,27 @@
+.section {
+  padding: 4rem 0;
+  background-color: var(--ifm-color-emphasis-100);
+}
+
+.intro {
+  margin-bottom: 2rem;
+  font-size: 1.1rem;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 2rem;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+}
+
+.stepNum {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--ifm-color-primary);
+  margin-bottom: 0.5rem;
+}

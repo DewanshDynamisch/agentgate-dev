@@ -9,7 +9,7 @@ import Head from '@docusaurus/Head';
 
 import styles from './index.module.css';
 
-export default function Home(): JSX.Element {
+export default function Home() {
   return (
     <Layout>
       <Head>
