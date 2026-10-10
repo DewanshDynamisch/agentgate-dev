@@ -11,13 +11,18 @@ Get AgentGate running locally with a realistic demonstration system in under 15 
 - Go ≥ 1.24 (for the token helper)
 Verified by deploy/demo/README.md and deploy/g6/probe-client/main.go.
 
-## 1. Start the Demo Stack
+First, clone the repository and navigate into it:
 
-First, generate the demo credential key needed by AgentGate to mint downstream credentials. Verified by deploy/demo/run-demo-e2e.ps1.
+```bash verify
+git clone https://github.com/agentgate/agentgate.git agentgate-demo || true
+cd agentgate-demo
+```
+
+Next, generate the demo credential key needed by AgentGate to mint downstream credentials. Verified by deploy/demo/run-demo-e2e.ps1.
 
 ```bash verify
 mkdir -p deploy/demo/secrets
-openssl genpkey -algorithm RSA -out deploy/demo/secrets/cred_key.pem -pkeyopt rsa_keygen_bits:2048
+docker run --rm -v "$(pwd)/deploy/demo/secrets:/out" --entrypoint sh alpine/openssl -c "openssl genrsa -out /out/cred_key.pem 2048 && chmod 644 /out/cred_key.pem"
 ```
 
 Then, start the Docker Compose stack. This will build and run AgentGate, a Postgres database, an API Gateway, and a sample support-desk backend. Verified by deploy/demo/docker-compose.yml.
@@ -48,6 +53,7 @@ Tool Call Succeeded:
 ```
 
 Now, attempt to delete a ticket. The `reader` role is forbidden from performing `destructive` operations like `delete_ticket`. Verified by deploy/demo/README.md.
+*(Note: Under the hood, this failure corresponds to a 403 Forbidden HTTP status code returned by the gateway when AgentGate denies the request.)*
 
 ```bash verify
 go run . -url http://localhost:3001 -tool delete_ticket -args '{"ticket_id":"TCK-1001"}' -skip-init -agent-id agent-reader -roles reader || true
