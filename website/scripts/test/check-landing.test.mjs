@@ -28,6 +28,9 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
             <img src="foo.png" alt="bar" />
             <div role="img" aria-label="Request flow animation"></div>
             <button aria-label="Pause animation"></button>
+            <section aria-label="Attack Scenarios Player"></section>
+            <button>Prev</button>
+            <button>Next</button>
         </body>
         </html>
         `;
@@ -96,6 +99,9 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
         const html = `<title>T</title><meta name="description" content="D"><meta property="og:image" content="img"><h1 id="hero-title">H1</h1><div class="ag-trust-badge"></div><div id="hero"></div><div id="problem"></div><div id="how-it-works"></div><div id="see-it-block"></div><div id="console"></div><div id="trust"></div><div id="quickstart"></div>
         <div role="img" aria-label="Request flow animation"></div>
         <button aria-label="Pause animation"></button>
+        <div aria-label="Attack Scenarios Player"></div>
+        <button>Previous</button>
+        <button>Next</button>
         `;
         const css = `@media (prefers-reduced-motion: reduce) { .animation { animation: none; } }`;
         const errors = checkLanding(html, css);

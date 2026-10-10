@@ -1,0 +1,87 @@
+.container {
+  max-width: 800px;
+  margin: 2rem auto;
+  padding: 1rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  background: var(--ifm-background-surface-color);
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.controls button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.controls button:hover {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.playerArea {
+  padding: 1rem;
+  background: var(--ifm-color-emphasis-0);
+  border-radius: 4px;
+  min-height: 250px;
+}
+
+.attackDesc {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  font-style: italic;
+}
+
+.stepList {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+}
+
+.stepHidden {
+  opacity: 0;
+  display: none;
+}
+
+.stepVisible {
+  opacity: 1;
+  display: list-item;
+  animation: fadeIn 0.3s ease-in;
+  margin-bottom: 0.5rem;
+}
+
+.result {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+.resultBlocked {
+  background-color: #ffebee;
+  color: #c62828;
+  border-left: 4px solid #c62828;
+}
+
+.resultAllowed {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border-left: 4px solid #2e7d32;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepVisible {
+    animation: none;
+  }
+}

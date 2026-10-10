@@ -70,6 +70,18 @@ export function checkLanding(html, css = '') {
         errors.push('Missing CSS prefers-reduced-motion rule that disables animation');
     }
 
+    // Attack Player tests
+    if (!/<[^>]+aria-label=["']Attack Scenarios Player["'][^>]*>/.test(html)) {
+        errors.push("Attack player region missing accessible name (aria-label=\"Attack Scenarios Player\")");
+    }
+    // Checks that the Prev and Next controls are <button>s
+    if (!/<button[^>]*>.*?Prev(ious)?.*?<\/button>/i.test(html) && !/<button[^>]*aria-label=["'][^"']*Prev(ious)?[^"']*["'][^>]*>/i.test(html)) {
+        errors.push("Attack player controls missing Prev <button>");
+    }
+    if (!/<button[^>]*>.*?Next.*?<\/button>/i.test(html) && !/<button[^>]*aria-label=["'][^"']*Next[^"']*["'][^>]*>/i.test(html)) {
+        errors.push("Attack player controls missing Next <button>");
+    }
+
     return errors;
 }
 

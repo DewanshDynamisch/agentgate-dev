@@ -4,6 +4,7 @@ import Hero from '../components/landing/Hero';
 import Problem from '../components/landing/Problem';
 import HowItWorks from '../components/landing/HowItWorks';
 import Trust from '../components/landing/Trust';
+import AttackPlayer from '../components/landing/AttackPlayer';
 import QuickstartTeaser from '../components/landing/QuickstartTeaser';
 import Head from '@docusaurus/Head';
 
@@ -24,7 +25,9 @@ export default function Home() {
         <Problem />
         <HowItWorks />
         
-        <div id="see-it-block"></div>
+        <div id="see-it-block">
+          <AttackPlayer />
+        </div>
         <div id="console"></div>
 
         <Trust />
