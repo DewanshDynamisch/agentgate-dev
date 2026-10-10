@@ -12,12 +12,9 @@ export default function AttackPlayer() {
   const totalSteps = scenario.steps.length + 1; // +1 for the result
 
   useEffect(() => {
-    // Check reduced motion preference
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (!mediaQuery.matches) {
-       // Only start auto-play if we want it initially, but wait, instructions say "no auto-play when reduced motion is requested".
-       // Does it imply auto-play by default?
-       // Let's not auto-play by default unless they click play, or just auto-play but respect the pref.
+      setIsPlaying(true);
     }
   }, []);
 

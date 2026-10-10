@@ -76,6 +76,8 @@ describe('scenarios.json', () => {
       } else if (funcBody.includes('!= http.StatusForbidden') || (funcBody.includes('StatusForbidden') && !funcBody.includes('StatusOK'))) {
         expectedStatus = 403;
       } else if (sc.http_status === 'non-200' || sc.http_status === null) {
+         assert.ok(!funcBody.includes('StatusUnauthorized'), `Test ${sc.source_test} has StatusUnauthorized but JSON says ${sc.http_status}`);
+         assert.ok(!funcBody.includes('StatusForbidden'), `Test ${sc.source_test} has StatusForbidden but JSON says ${sc.http_status}`);
          expectedStatus = sc.http_status;
       }
 
