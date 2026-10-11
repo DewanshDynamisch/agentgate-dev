@@ -1,0 +1,82 @@
+[
+  {
+    "id": "no-token",
+    "title": "Unauthenticated Request",
+    "attack": "An attacker sends a request without an authorization token.",
+    "steps": ["Attacker sends a request to the gateway", "Gateway forwards to AgentGate", "AgentGate rejects the request"],
+    "result": "AgentGate returns 401 Unauthorized",
+    "outcome": "blocked",
+    "http_status": 401,
+    "source_test": "TestV1_08_NoToken"
+  },
+  {
+    "id": "forged-token",
+    "title": "Forged Token",
+    "attack": "An attacker sends a self-signed JWT with an untrusted RSA key.",
+    "steps": ["Attacker forges a JWT", "Attacker sends the forged token to the gateway", "AgentGate verifies the signature against the trusted JWKS"],
+    "result": "AgentGate rejects the invalid signature with 401 Unauthorized",
+    "outcome": "blocked",
+    "http_status": 401,
+    "source_test": "TestV1_09_ForgedToken"
+  },
+  {
+    "id": "identity-spoofing",
+    "title": "Identity Spoofing",
+    "attack": "An attacker attempts to spoof identity using client headers like x-agent-id.",
+    "steps": ["Attacker injects x-agent-id header", "Attacker sends request with low-privilege token", "AgentGate ignores headers and trusts only token claims"],
+    "result": "AgentGate denies the request based on the actual token identity with 403 Forbidden",
+    "outcome": "blocked",
+    "http_status": 403,
+    "source_test": "TestV1_07_IdentitySpoofing"
+  },
+  {
+    "id": "credential-replay",
+    "title": "Credential Replay",
+    "attack": "An attacker captures a downstream minted credential and replays it.",
+    "steps": ["Attacker intercepts a valid downstream credential", "Attacker attempts to replay the credential to the backend"],
+    "result": "Backend rejects the replayed jti claim with 401 Unauthorized",
+    "outcome": "blocked",
+    "http_status": 401,
+    "source_test": "TestV1_03_CredentialReplay"
+  },
+  {
+    "id": "credential-expiry",
+    "title": "Credential Expiry",
+    "attack": "An attacker attempts to use a captured credential after its lifetime.",
+    "steps": ["Attacker intercepts a valid downstream credential", "Attacker waits 70 seconds", "Attacker sends the expired credential to the backend"],
+    "result": "Backend rejects the expired token with 401 Unauthorized",
+    "outcome": "blocked",
+    "http_status": 401,
+    "source_test": "TestV1_05_CredentialExpiry"
+  },
+  {
+    "id": "unknown-tool",
+    "title": "Unknown Tool Access",
+    "attack": "An attacker attempts to invoke a nonexistent or unregistered tool.",
+    "steps": ["Attacker sends a request for an unregistered tool", "AgentGate checks the catalog"],
+    "result": "AgentGate rejects the request with 403 Forbidden",
+    "outcome": "blocked",
+    "http_status": 403,
+    "source_test": "TestV1_10_UnknownTool"
+  },
+  {
+    "id": "audit-tamper",
+    "title": "Audit Log Tampering",
+    "attack": "An attacker with database access attempts to modify existing audit events.",
+    "steps": ["Attacker executes a direct UPDATE on the audit_events table", "PostgreSQL trigger executes"],
+    "result": "Database rejects the update since the table is append-only",
+    "outcome": "blocked",
+    "http_status": null,
+    "source_test": "TestV1_15_AuditTamper"
+  },
+  {
+    "id": "agentgate-outage",
+    "title": "Fail-Closed on Outage",
+    "attack": "An attacker attempts to bypass controls while the AgentGate engine is stopped.",
+    "steps": ["AgentGate engine is stopped", "Attacker sends a request to the gateway", "Gateway attempts to reach AgentGate"],
+    "result": "Gateway fails closed and rejects the request",
+    "outcome": "blocked",
+    "http_status": "non-200",
+    "source_test": "TestV1_16_AgentGateOutage"
+  }
+]

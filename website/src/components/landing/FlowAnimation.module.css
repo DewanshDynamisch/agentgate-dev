@@ -1,0 +1,102 @@
+.container {
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+}
+
+.pauseBtn {
+  background: var(--ag-bg-surface, #fff);
+  border: 1px solid var(--ag-border, #e4e4e7);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: var(--ag-font-sans, sans-serif);
+  font-size: 12px;
+  color: var(--ag-text-primary, #18181b);
+}
+
+.svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.box {
+  fill: var(--ag-bg-surface, #ffffff);
+  stroke: var(--ag-border, #e4e4e7);
+  stroke-width: 2;
+}
+
+.text {
+  fill: var(--ag-text-primary, #18181b);
+  font-family: var(--ag-font-sans, sans-serif);
+  font-size: 14px;
+  text-anchor: middle;
+}
+
+.line {
+  stroke: var(--ag-text-secondary, #71717a);
+  stroke-width: 2;
+  marker-end: url(#flow-arrow);
+}
+
+.accentBox {
+  fill: var(--ag-accent-soft, #e0e7ff);
+  stroke: var(--ag-accent, #4338ca);
+  stroke-width: 2;
+}
+
+.token {
+  fill: var(--ag-candidate, #a16207);
+  opacity: 0;
+  animation: flowAnimation 8s linear infinite;
+}
+
+.paused .token {
+  animation-play-state: paused;
+}
+
+.staticToken {
+  display: none;
+}
+
+@keyframes flowAnimation {
+  /* 0-4s: Allowed path */
+  0% { transform: translate(150px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  10% { transform: translate(250px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  20% { transform: translate(250px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); } /* processing at gateway */
+  30% { transform: translate(450px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  40% { transform: translate(450px, 180px); opacity: 1; fill: var(--ag-allow, #15803d); } /* allowed */
+  50% { transform: translate(650px, 180px); opacity: 1; fill: var(--ag-allow, #15803d); }
+  51% { transform: translate(650px, 180px); opacity: 0; }
+  /* Reset for next phase */
+  52% { transform: translate(150px, 180px); opacity: 0; }
+  
+  /* 4-8s: Denied path */
+  55% { transform: translate(150px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  65% { transform: translate(250px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  75% { transform: translate(250px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  85% { transform: translate(450px, 180px); opacity: 1; fill: var(--ag-candidate, #a16207); }
+  90% { transform: translate(450px, 180px); opacity: 1; fill: var(--ag-deny, #b91c1c); } /* denied! */
+  /* Drop token down to show rejection */
+  95% { transform: translate(450px, 200px); opacity: 0; fill: var(--ag-deny, #b91c1c); }
+  100% { transform: translate(150px, 180px); opacity: 0; fill: var(--ag-candidate, #a16207); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .token {
+    animation: none !important;
+    display: none;
+  }
+  .staticToken {
+    display: block;
+  }
+}

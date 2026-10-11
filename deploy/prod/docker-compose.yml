@@ -211,7 +211,7 @@ services:
     container_name: prod-admin-ui
     restart: unless-stopped
     environment:
-      AGENTGATE_UI_API_URL: "${AGENTGATE_UI_API_URL:-https://localhost:9443}"
+      AGENTGATE_UI_API_URL: "${AGENTGATE_UI_API_URL:-}"
       AGENTGATE_UI_OIDC_AUTHORITY: "${AGENTGATE_UI_OIDC_AUTHORITY:-https://localhost:8443/realms/agentgate}"
       AGENTGATE_UI_OIDC_CLIENT_ID: "${AGENTGATE_UI_OIDC_CLIENT_ID:-agentgate-admin-ui}"
     volumes:

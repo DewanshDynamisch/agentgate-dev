@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { CompassIcon } from "lucide-react";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { usePageTitle } from "../../lib/usePageTitle";
 
 export function NotFoundPage() {
+  usePageTitle("Not found");
   return (
     <div className="ag-page">
       <EmptyState

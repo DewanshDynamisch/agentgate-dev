@@ -310,7 +310,7 @@ components:
     adminBearer:
       type: http
       scheme: bearer
-      description: Same admin token, sent as `Authorization: Bearer <token>` instead of the dedicated header.
+      description: "Same admin token, sent as `Authorization: Bearer <token>` instead of the dedicated header."
 
   parameters:
     WorkspaceID:

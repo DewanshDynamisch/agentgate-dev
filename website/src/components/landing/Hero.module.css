@@ -1,0 +1,32 @@
+.heroSection {
+  padding: 4rem 0;
+  text-align: center;
+  background-color: var(--ifm-color-emphasis-100);
+}
+
+.title {
+  font-size: 3rem;
+  font-weight: bold;
+}
+
+.tagline {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.promise {
+  font-size: 1.25rem;
+  margin-bottom: 2rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-bottom: 3rem;
+}
+
+.animationSlot {
+  min-height: 200px;
+}

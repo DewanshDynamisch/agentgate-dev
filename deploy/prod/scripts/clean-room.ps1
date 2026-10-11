@@ -38,6 +38,7 @@ Write-Host "========================================================" -Foregroun
 # Step 1: docker compose down -v
 # -------------------------------------------------------------------------
 Write-Host "`n--> Step 1: docker compose down -v" -ForegroundColor Yellow
+$ErrorActionPreference = "Continue"
 try {
     & docker compose -f $composeFile down -v --remove-orphans 2>&1 | Out-Null
     Record-Check 1 "Clean teardown with volumes removed" $true
@@ -45,6 +46,7 @@ try {
     Record-Check 1 "Clean teardown with volumes removed" $false $_.Exception.Message
     exit 1
 }
+$ErrorActionPreference = "Stop"
 
 # -------------------------------------------------------------------------
 # Step 2: init-secrets
@@ -89,10 +91,11 @@ try {
 # Step 4: Wait for health (Keycloak, AgentGate, Agentgateway, Admin UI)
 # -------------------------------------------------------------------------
 Write-Host "`n--> Step 4: Waiting for service health" -ForegroundColor Yellow
+$ErrorActionPreference = "Continue"
 $kcHealthy = $false
 for ($i = 0; $i -lt 50; $i++) {
     Start-Sleep -Seconds 2
-    $code = (docker run --rm alpine/openssl wget --no-check-certificate -q -S -O /dev/null https://localhost:8443/realms/agentgate/.well-known/openid-configuration 2>&1 | Select-String "HTTP/" | Select-Object -Last 1) -replace '.*HTTP/\S+\s+(\d+).*','$1'
+    $code = (docker run --rm alpine wget --no-check-certificate -q -S -O /dev/null https://host.docker.internal:8443/realms/agentgate/.well-known/openid-configuration 2>&1 | Select-String "HTTP/" | Select-Object -Last 1) -replace '.*HTTP/\S+\s+(\d+).*','$1'
     if ($code -eq "200") {
         $kcHealthy = $true
         break
@@ -106,6 +109,7 @@ for ($i = 0; $i -lt 50; $i++) {
         }
     } catch {}
 }
+$ErrorActionPreference = "Stop"
 
 if (-not $kcHealthy) {
     Record-Check 4 "Service healthchecks" $false "Keycloak failed to report healthy within timeout"

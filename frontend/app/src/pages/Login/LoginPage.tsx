@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../../state/AuthProvider";
+import { usePageTitle } from "../../lib/usePageTitle";
 
 export function LoginPage() {
   const { user, loading, ssoConfigured, login } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  usePageTitle("Login");
 
   if (!loading && user) {
     return <Navigate to="/" replace />;
@@ -34,11 +35,32 @@ export function LoginPage() {
           padding: "32px 28px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
-          <ShieldCheck size={20} strokeWidth={2} />
-          AgentGate
+        {/* Brand mark + wordmark */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <img
+            src="/favicon.svg"
+            alt="AgentGate"
+            width={32}
+            height={32}
+            style={{ display: "block", flexShrink: 0 }}
+          />
+          <span style={{ fontWeight: 600, fontSize: 16, color: "var(--ag-text-primary)" }}>
+            AgentGate
+          </span>
         </div>
-        <p style={{ margin: "0 0 24px", fontSize: 13, color: "var(--ag-text-secondary)" }}>
+
+        {/* Tagline */}
+        <p style={{ margin: "0 0 6px", fontSize: 13, color: "var(--ag-text-secondary)", lineHeight: 1.5 }}>
+          A checkpoint in the only path between an AI agent and its tools.
+        </p>
+        <p style={{ margin: "0 0 24px", fontSize: 13, color: "var(--ag-text-muted)" }}>
           Sign in with your organization account to manage policies.
         </p>
 

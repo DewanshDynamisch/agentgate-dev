@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePageTitle } from '../../lib/usePageTitle';
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Plus, ArrowRight, ShieldCheck, X } from "lucide-react";
@@ -31,6 +32,7 @@ const STATE_LABEL: Record<PolicyRecord["state"], string> = {
 };
 
 export function PoliciesListPage() {
+  usePageTitle('Policies');
   const { state, ready } = useGovernance();
   const [selectedTab, setSelectedTab] = useState<"all" | PolicyRecord["state"]>("all");
   const [selectedPolicy, setSelectedPolicy] = useState<PolicyRecord | null>(null);

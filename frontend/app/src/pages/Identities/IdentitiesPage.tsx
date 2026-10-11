@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePageTitle } from '../../lib/usePageTitle';
 import { Users } from "lucide-react";
 import { useGovernanceClient } from "../../state/GovernanceProvider";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -13,6 +14,7 @@ function formatTime(iso: string): string {
 }
 
 export function IdentitiesPage() {
+  usePageTitle('Identities');
   const { client, workspaceId } = useGovernanceClient();
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);

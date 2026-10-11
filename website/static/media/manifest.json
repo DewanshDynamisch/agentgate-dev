@@ -1,0 +1,41 @@
+{
+  "files": [
+    {
+      "name": "dashboard-light.png",
+      "bytes": 58269
+    },
+    {
+      "name": "dashboard-dark.png",
+      "bytes": 57729
+    },
+    {
+      "name": "audit-light.png",
+      "bytes": 46094
+    },
+    {
+      "name": "audit-dark.png",
+      "bytes": 46362
+    },
+    {
+      "name": "tools-light.png",
+      "bytes": 92734
+    },
+    {
+      "name": "tools-dark.png",
+      "bytes": 92344
+    },
+    {
+      "name": "policies-light.png",
+      "bytes": 43898
+    },
+    {
+      "name": "policies-dark.png",
+      "bytes": 43187
+    },
+    {
+      "name": "walkthrough.webm",
+      "bytes": 2869906
+    }
+  ],
+  "totalBytes": 3350523
+}

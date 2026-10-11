@@ -1,4 +1,5 @@
 import { ComingSoonPage } from "../../components/ui/ComingSoonPage";
+import { usePageTitle } from '../../lib/usePageTitle';
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return (
@@ -10,6 +11,7 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 }
 
 export function SettingsPage() {
+  usePageTitle('Settings');
   return (
     <ComingSoonPage
       title="Settings"

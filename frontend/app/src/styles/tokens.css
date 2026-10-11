@@ -6,7 +6,6 @@
   (versions, hashes, IDs, decisions).
 */
 
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap");
 
 :root {
   /* Surface */
@@ -20,7 +19,7 @@
 
   /* Text */
   --ag-text-primary: #18181b;
-  --ag-text-secondary: #71717a;
+  --ag-text-secondary: #6e6e76;
   --ag-text-muted: #a1a1aa;
   --ag-text-inverse: #ffffff;
 
@@ -44,6 +43,35 @@
   --ag-font-mono: "Geist Mono", ui-monospace, "IBM Plex Mono", monospace;
 
   /* Shape — interactive elements get radius, structural ones stay flat */
+  --ag-radius-control: 6px;
+  --ag-content-width: 1180px;
+  --ag-topbar-height: 68px;
+}
+
+[data-theme="dark"] {
+  --ag-bg-canvas: #09090b;
+  --ag-bg-surface: #18181b;
+  --ag-bg-topbar: #18181b;
+  --ag-border: #27272a;
+  --ag-border-soft: #18181b;
+  --ag-border-strong: #3f3f46;
+  --ag-text-primary: #f4f4f5;
+  --ag-text-secondary: #a1a1aa;
+  --ag-text-muted: #52525b;
+  --ag-text-inverse: #09090b;
+  --ag-accent: #818cf8;
+  --ag-accent-hover: #6366f1;
+  --ag-accent-soft: #312e81;
+  --ag-allow: #4ade80;
+  --ag-allow-soft: #064e3b;
+  --ag-deny: #f87171;
+  --ag-deny-soft: #450a0a;
+  --ag-candidate: #facc15;
+  --ag-candidate-soft: #713f12;
+  --ag-neutral: #a1a1aa;
+  --ag-neutral-soft: #27272a;
+  --ag-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --ag-font-mono: "Geist Mono", ui-monospace, "IBM Plex Mono", monospace;
   --ag-radius-control: 6px;
   --ag-content-width: 1180px;
   --ag-topbar-height: 68px;
