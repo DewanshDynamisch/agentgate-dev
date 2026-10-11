@@ -27,8 +27,19 @@ export function parseAuditEvent(raw: unknown): ParseResult<AuditEvent> {
   if (typeof et !== "string" || et === "") return invalid("audit event missing event_type");
 
   const strs: Record<string, string> = {};
+  const rawId = raw["id"];
+  if (typeof rawId === "number") {
+    strs["id"] = String(rawId);
+  } else if (typeof rawId === "string") {
+    strs["id"] = rawId;
+  } else if (rawId !== undefined && rawId !== null) {
+    return invalid("audit event field id must be a string or number");
+  } else {
+    strs["id"] = "";
+  }
+
   for (const k of [
-    "id", "workspace_id", "execution_id", "decision", "reason", "principal_agent_id",
+    "workspace_id", "execution_id", "decision", "reason", "principal_agent_id",
     "principal_on_behalf_of", "tool_backend_id", "tool_name", "tool_risk", "policy_version", "policy_hash",
   ]) {
     const v = optStr(raw, k);
