@@ -82,6 +82,14 @@ export function checkLanding(html, css = '') {
         errors.push("Attack player controls missing Next <button>");
     }
 
+    // Video attributes check (muted, loop, playsinline, poster)
+    const videoMatches = html.match(/<video\b[^>]*>/gi) || [];
+    for (const vTag of videoMatches) {
+        if (!/\bmuted\b/i.test(vTag) || !/\bloop\b/i.test(vTag) || !/\bplaysinline\b/i.test(vTag) || !/\bposter=["'][^"']+["']/i.test(vTag)) {
+            errors.push(`video missing required attributes (muted, loop, playsinline, poster): ${vTag}`);
+        }
+    }
+
     return errors;
 }
 

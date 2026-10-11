@@ -102,9 +102,34 @@ test('check-landing parses correctly and fails appropriately', async (t) => {
         <div aria-label="Attack Scenarios Player"></div>
         <button>Previous</button>
         <button>Next</button>
+        <div id="console">
+            <img src="/media/dashboard-light.png" alt="Console Dashboard" />
+            <video muted loop playsinline poster="/media/dashboard-light.png"></video>
+        </div>
         `;
         const css = `@media (prefers-reduced-motion: reduce) { .animation { animation: none; } }`;
         const errors = checkLanding(html, css);
         assert.deepEqual(errors, []);
+    });
+
+    await t.test('fails if console video is missing muted/loop/playsinline/poster', () => {
+        const html = `
+        <title>T</title><meta name="description" content="D"><meta property="og:image" content="img">
+        <h1 id="hero-title">H1</h1><div class="ag-trust-badge"></div>
+        <div id="hero"></div><div id="problem"></div><div id="how-it-works"></div>
+        <div id="see-it-block"></div>
+        <div id="console">
+            <img src="/media/dashboard-light.png" alt="Console Dashboard" />
+            <video src="/media/walkthrough.webm"></video>
+        </div>
+        <div id="trust"></div><div id="quickstart"></div>
+        <div role="img" aria-label="Request flow animation"></div>
+        <button aria-label="Pause animation"></button>
+        <div aria-label="Attack Scenarios Player"></div>
+        <button>Previous</button><button>Next</button>
+        `;
+        const css = `@media (prefers-reduced-motion: reduce) { .animation { animation: none; } }`;
+        const errors = checkLanding(html, css);
+        assert.ok(errors.some(e => e.includes('video missing required attributes')));
     });
 });

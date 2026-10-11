@@ -100,7 +100,8 @@ echo ":::AG_EXIT ${block.index} \$?"
 `;
 }
 
-fs.writeFileSync('.ag-verify-tmp/runner.sh', scriptContent);
+const runnerScript = path.join(tmpDir, 'runner.sh');
+fs.writeFileSync(runnerScript, scriptContent);
 const result = spawnSync('bash', ['.ag-verify-tmp/runner.sh'], {
   cwd: REPO_ROOT,
   encoding: 'utf8',

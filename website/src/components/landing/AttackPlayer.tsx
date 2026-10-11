@@ -69,11 +69,11 @@ export default function AttackPlayer() {
   return (
     <section className={styles.container} aria-label="Attack Scenarios Player" onKeyDown={handleKeyDown} tabIndex={0}>
       <div className={styles.controls}>
-        <button onClick={handlePrev} aria-label="Previous step">Prev</button>
+        <button onClick={handlePrev} aria-label="Previous">Previous</button>
         <button onClick={() => setIsPlaying(!isPlaying)} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? 'Pause' : 'Play'}
         </button>
-        <button onClick={handleNext} aria-label="Next step">Next</button>
+        <button onClick={handleNext} aria-label="Next">Next</button>
       </div>
 
       <div className={styles.playerArea}>
