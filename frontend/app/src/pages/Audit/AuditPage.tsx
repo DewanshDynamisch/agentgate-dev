@@ -1,127 +1,295 @@
-import { useState } from "react";
-import { ComingSoonPage } from "../../components/ui/ComingSoonPage";
-import { StatusDot } from "../../components/ui/StatusDot";
-import type { Decision, ReasonCode } from "@contract/models/decision";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ScrollText } from "lucide-react";
+import { useGovernanceClient } from "../../state/GovernanceProvider";
+import { StatusDot, type StatusTone } from "../../components/ui/StatusDot";
+import { CopyableValue } from "../../components/ui/CopyableValue";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { TableSkeleton } from "../../components/ui/Skeleton";
+import type { AuditEvent } from "@contract/models/audit";
+import { usePageTitle } from "../../lib/usePageTitle";
 
-interface AuditFixtureRow {
-  time: string;
-  agentId: string;
-  onBehalfOf?: string;
-  toolName: string;
-  decision: Decision;
-  reason: ReasonCode;
-  policyVersion: string;
-  executionId: string;
-  rowHash: string;
-  prevHash: string;
+const PAGE_SIZE = 50;
+const REFRESH_INTERVAL_MS = 5000;
+const COLUMN_COUNT = 9;
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-const FIXTURE_ROWS: AuditFixtureRow[] = [
-  {
-    time: "10:24:01",
-    agentId: "agent-support",
-    onBehalfOf: "user-jdoe",
-    toolName: "customer.read",
-    decision: "ALLOW",
-    reason: "policy_allow",
-    policyVersion: "v1",
-    executionId: "req-83920",
-    rowHash: "9f2a...c31e",
-    prevHash: "7b10...44aa",
-  },
-  {
-    time: "10:24:12",
-    agentId: "agent-support",
-    onBehalfOf: "user-support",
-    toolName: "customer.delete",
-    decision: "DENY",
-    reason: "policy_deny",
-    policyVersion: "v1",
-    executionId: "req-83921",
-    rowHash: "3c88...0021",
-    prevHash: "9f2a...c31e",
-  },
-  {
-    time: "10:23:55",
-    agentId: "agent-finance",
-    onBehalfOf: "user-mike",
-    toolName: "customer.update",
-    decision: "DENY",
-    reason: "no_matching_policy",
-    policyVersion: "v1",
-    executionId: "req-83918",
-    rowHash: "7b10...44aa",
-    prevHash: "1a04...9e02",
-  },
-];
+function toolLabel(e: AuditEvent): string {
+  if (!e.toolBackendId && !e.toolName) return "—";
+  return `${e.toolBackendId}/${e.toolName}`;
+}
+
+function decisionTone(decision: string): StatusTone {
+  if (decision === "ALLOW") return "allow";
+  if (decision === "DENY") return "deny";
+  return "neutral";
+}
+
+/** Merge events into an existing list, deduplicating by sequenceNumber, newest first. */
+function mergeEvents(existing: AuditEvent[], incoming: AuditEvent[]): AuditEvent[] {
+  const bySeq = new Map<number, AuditEvent>();
+  for (const e of existing) bySeq.set(e.sequenceNumber, e);
+  for (const e of incoming) bySeq.set(e.sequenceNumber, e);
+  return [...bySeq.values()].sort((a, b) => b.sequenceNumber - a.sequenceNumber);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "Failed to load audit events";
+}
 
 export function AuditPage() {
-  const [selected, setSelected] = useState<AuditFixtureRow>(FIXTURE_ROWS[0]!);
+  const { client, workspaceId } = useGovernanceClient();
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [nextBefore, setNextBefore] = useState<number | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Distinct error sources so one path's success never hides another path's failure.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [decisionFilter, setDecisionFilter] = useState("");
+  const [toolFilter, setToolFilter] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Initial load. The cancelled flag prevents state updates after unmount / client change.
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listAuditEvents(workspaceId, { limit: PAGE_SIZE })
+      .then((res) => {
+        if (cancelled) return;
+        setEvents(mergeEvents([], res.events));
+        setNextBefore(res.nextBeforeSequence);
+        setLoadError(null);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, workspaceId]);
+
+  // Auto-refresh: refetch the first page and merge; the pagination cursor is left untouched.
+  useEffect(() => {
+    if (!autoRefresh) return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      client
+        .listAuditEvents(workspaceId, { limit: PAGE_SIZE })
+        .then((res) => {
+          if (cancelled) return;
+          setEvents((prev) => mergeEvents(prev, res.events));
+          setRefreshError(null);
+          setLoadError(null);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setRefreshError(errorMessage(err));
+        })
+        .finally(() => {
+          inFlight.current = false;
+        });
+    }, REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      inFlight.current = false;
+    };
+  }, [autoRefresh, client, workspaceId]);
+
+  const loadOlder = useCallback(async () => {
+    if (nextBefore === undefined) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const res = await client.listAuditEvents(workspaceId, { limit: PAGE_SIZE, beforeSequence: nextBefore });
+      if (!mounted.current) return;
+      setEvents((prev) => mergeEvents(prev, res.events));
+      setNextBefore(res.nextBeforeSequence);
+    } catch (err) {
+      if (mounted.current) setOlderError(errorMessage(err));
+    } finally {
+      if (mounted.current) setLoadingOlder(false);
+    }
+  }, [client, workspaceId, nextBefore]);
+
+  const visible = useMemo(() => {
+    const tool = toolFilter.trim().toLowerCase();
+    const agent = agentFilter.trim().toLowerCase();
+    return events.filter(
+      (e) =>
+        (!decisionFilter || e.decision === decisionFilter) &&
+        (!tool || toolLabel(e).toLowerCase().includes(tool)) &&
+        (!agent || e.principalAgentId.toLowerCase().includes(agent))
+    );
+  }, [events, decisionFilter, toolFilter, agentFilter]);
+
+  // Only an initial load that yielded nothing hides the table; already-loaded rows stay visible.
+  const showRows = !loading && !(loadError && events.length === 0);
+  const errors = [loadError, refreshError, olderError].filter((m): m is string => m !== null);
 
   return (
-    <ComingSoonPage
-      title="Audit log"
-      subtitle="Every authorization decision, allowed or denied."
-      note="Not backed yet. Durable audit persistence (Gate G5) is real on the backend — hash-chained, tamper-evident — but there is no REST endpoint to read it back yet. This screen is fixture data shaped like the real record, not a live feed."
-    >
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 24 }}>
-        <table className="ag-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Identity</th>
-              <th>Tool</th>
-              <th>Decision</th>
-            </tr>
-          </thead>
-          <tbody>
-            {FIXTURE_ROWS.map((row) => (
-              <tr
-                key={row.executionId}
-                onClick={() => setSelected(row)}
-                style={{
-                  cursor: "pointer",
-                  background: selected.executionId === row.executionId ? "var(--ag-bg-canvas)" : undefined,
-                }}
-              >
-                <td className="ag-mono">{row.time}</td>
-                <td className="ag-mono">{row.agentId}</td>
-                <td className="ag-mono">{row.toolName}</td>
-                <td>
-                  <StatusDot tone={row.decision === "ALLOW" ? "allow" : "deny"}>{row.decision}</StatusDot>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="ag-card">
-          <div className="ag-card-header">
-            <h2 className="ag-card-title">Event detail</h2>
-            <StatusDot tone={selected.decision === "ALLOW" ? "allow" : "deny"}>{selected.decision}</StatusDot>
-          </div>
-          <div className="ag-card-body">
-            <dl style={{ margin: 0, fontSize: 13 }}>
-              {[
-                ["Time", selected.time],
-                ["Agent", selected.agentId],
-                ["Acting for", selected.onBehalfOf ?? "—"],
-                ["Tool", selected.toolName],
-                ["Reason", selected.reason],
-                ["Policy version", selected.policyVersion],
-                ["Execution ID", selected.executionId],
-                ["Row hash", selected.rowHash],
-                ["Prev hash", selected.prevHash],
-              ].map(([label, value]) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--ag-border-soft)" }}>
-                  <dt style={{ color: "var(--ag-text-secondary)" }}>{label}</dt>
-                  <dd className="ag-mono" style={{ margin: 0, textAlign: "right", color: "var(--ag-text-primary)" }}>{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
+    <div className="ag-page">
+      <div className="ag-page-header">
+        <div>
+          <h1 className="ag-page-title">Audit log</h1>
+          <p className="ag-page-subtitle">Every authorization decision, allowed or denied.</p>
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
+          />
+          Auto-refresh (5s)
+        </label>
       </div>
-    </ComingSoonPage>
+
+      {errors.map((message) => (
+        <div key={message} className="ag-alert ag-alert-error" role="alert">
+          {message}
+        </div>
+      ))}
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 }}>
+          Decision
+          <select
+            className="ag-input"
+            value={decisionFilter}
+            onChange={(e) => setDecisionFilter(e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="ALLOW">ALLOW</option>
+            <option value="DENY">DENY</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 }}>
+          Tool
+          <input
+            className="ag-input"
+            value={toolFilter}
+            onChange={(e) => setToolFilter(e.target.value)}
+            placeholder="backend/tool"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 }}>
+          Agent
+          <input
+            className="ag-input"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            placeholder="agent id"
+          />
+        </label>
+      </div>
+
+      {loading && <TableSkeleton rows={5} columns={COLUMN_COUNT} />}
+
+      {showRows && events.length === 0 && (
+        <EmptyState
+          icon={ScrollText}
+          title="No audit events yet"
+          subtitle="Authorization decisions will appear here as agents call tools."
+        />
+      )}
+
+      {showRows && events.length > 0 && (
+        <>
+          {visible.length === 0 ? (
+            <EmptyState
+              icon={ScrollText}
+              title="No matching events"
+              subtitle="No loaded events match the current filters."
+            />
+          ) : (
+            <table className="ag-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Decision</th>
+                  <th>Reason</th>
+                  <th>Agent</th>
+                  <th>On behalf of</th>
+                  <th>Tool</th>
+                  <th>Risk</th>
+                  <th>Policy</th>
+                  <th>Execution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((e) => {
+                  const args = Object.entries(e.redactedArguments ?? {});
+                  return (
+                    <Fragment key={e.sequenceNumber}>
+                      <tr
+                        onClick={() => setExpanded(expanded === e.sequenceNumber ? null : e.sequenceNumber)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td className="ag-mono">{formatTime(e.timestamp)}</td>
+                        <td>
+                          <StatusDot tone={decisionTone(e.decision)}>{e.decision || e.eventType}</StatusDot>
+                        </td>
+                        <td className="ag-mono">{e.reason || "—"}</td>
+                        <td className="ag-mono">{e.principalAgentId || "—"}</td>
+                        <td className="ag-mono">{e.principalOnBehalfOf || "—"}</td>
+                        <td className="ag-mono">{toolLabel(e)}</td>
+                        <td>{e.toolRisk || "—"}</td>
+                        <td className="ag-mono">{e.policyVersion || "—"}</td>
+                        <td>{e.executionId ? <CopyableValue value={e.executionId} /> : "—"}</td>
+                      </tr>
+                      {expanded === e.sequenceNumber && (
+                        <tr>
+                          <td colSpan={COLUMN_COUNT} data-testid={`audit-args-${e.sequenceNumber}`}>
+                            {args.length === 0 ? (
+                              <span style={{ color: "var(--ag-text-secondary)" }}>No arguments recorded</span>
+                            ) : (
+                              <dl style={{ margin: 0, fontSize: 13 }}>
+                                {args.map(([k, v]) => (
+                                  <div key={k} style={{ display: "flex", gap: 16, padding: "4px 0" }}>
+                                    <dt className="ag-mono" style={{ color: "var(--ag-text-secondary)" }}>{k}</dt>
+                                    <dd className="ag-mono" style={{ margin: 0 }}>{v}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          {nextBefore !== undefined && (
+            <div style={{ marginTop: 16, textAlign: "center" }}>
+              <button className="ag-btn ag-btn-secondary" onClick={loadOlder} disabled={loadingOlder}>
+                {loadingOlder ? "Loading…" : "Load older"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

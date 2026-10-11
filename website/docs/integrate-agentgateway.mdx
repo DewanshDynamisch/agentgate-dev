@@ -1,0 +1,29 @@
+---
+sidebar_position: 3
+---
+
+import AgentgatewayConfig from './_generated/agentgateway-config.mdx';
+
+# Integrate with AgentGateway
+
+AgentGate is designed to sit behind an API Gateway that handles the initial inbound request authentication.
+
+## Gateway Requirements
+AgentGate expects the following from the gateway:
+- **JWT Auth in strict mode**: The gateway must validate the inbound JWT and its audience. Verified by deploy/demo/agentgateway.yaml.
+- **ext_authz over gRPC**: The gateway must use Envoy's ext_authz protocol over gRPC. Verified by deploy/demo/agentgateway.yaml.
+- **Request Body Inclusion**: The gateway must include the request body in the ext_authz call. Verified by deploy/demo/agentgateway.yaml.
+- **Fail-closed**: The gateway must fail closed on callout failure (`failureMode: deny`). Verified by deploy/demo/agentgateway.yaml.
+
+## AgentGateway Configuration
+Here is the required configuration for AgentGateway:
+
+<AgentgatewayConfig />
+
+## Request Headers and Identity
+The gateway applies AgentGate's response headers to the downstream request, including credential overwrite and inbound token removal. Verified by deploy/demo/run-demo-e2e.ps1.
+AgentGate reads identity strictly from the gateway-verified token metadata only. Verified by deploy/g6/probe-client/main.go.
+
+## Version Compatibility
+AgentGate is tested against the pinned gateway version `cr.agentgateway.dev/agentgateway:v1.4.0@sha256:771afaf093065477fa296eb90dcb618a0300165f12a32f80bbdd1427fab900ec`. Verified by deploy/demo/agentgateway.yaml.
+The implementation targets the pinned MCP revision `2026-07-28` as the protocol boundary. Verified by docs/OPERATIONS/RUNBOOK.md.

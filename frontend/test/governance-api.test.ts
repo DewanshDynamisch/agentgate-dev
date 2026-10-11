@@ -9,6 +9,7 @@ import {
 import {
   MockGovernanceClient,
   HttpGovernanceClient,
+  staticToken,
 } from "../src/api/governanceClient.js";
 import { g3Fixtures } from "../src/fixtures/governanceFixtures.js";
 
@@ -133,7 +134,7 @@ describe("Frontend G3 Governance API Client & Models", () => {
       };
     };
 
-    const client = new HttpGovernanceClient("http://localhost:8090", "test-admin-token", mockFetch as any);
+    const client = new HttpGovernanceClient("http://localhost:8090", staticToken("test-admin-token"), mockFetch as any);
 
     const list = await client.listPolicies("ws-test");
     expect(capturedUrl).toBe("http://localhost:8090/api/v1/workspaces/ws-test/policies");

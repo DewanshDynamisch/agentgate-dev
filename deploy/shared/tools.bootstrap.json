@@ -1,0 +1,266 @@
+{
+  "tools": [
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "read_status",
+      "risk": "read",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "verbose",
+          "type": "bool",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "write_status",
+      "risk": "write",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "amount",
+          "type": "int64",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "admin_action",
+      "risk": "destructive",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean"
+          }
+        }
+      },
+      "arguments": [],
+      "description": ""
+    },
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "list_tickets",
+      "risk": "read",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status_filter": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "status_filter",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "update_ticket_status",
+      "risk": "write",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string"
+          },
+          "new_status": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "ticket_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "new_status",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "mcp-probe",
+      "tool_name": "delete_ticket",
+      "risk": "destructive",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "ticket_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "read_status",
+      "risk": "read",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "verbose",
+          "type": "bool",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "write_status",
+      "risk": "write",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "amount",
+          "type": "int64",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "admin_action",
+      "risk": "destructive",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean"
+          }
+        }
+      },
+      "arguments": [],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "list_tickets",
+      "risk": "read",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status_filter": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "status_filter",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "update_ticket_status",
+      "risk": "write",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string"
+          },
+          "new_status": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "ticket_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "new_status",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "description": ""
+    },
+    {
+      "backend_id": "default",
+      "tool_name": "delete_ticket",
+      "risk": "destructive",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": [
+        {
+          "name": "ticket_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "description": ""
+    }
+  ]
+}

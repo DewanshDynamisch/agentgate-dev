@@ -95,7 +95,9 @@ func (s *PostgresStore) AppendDecision(ctx context.Context, record DecisionRecor
 	}
 
 	if record.Timestamp.IsZero() {
-		record.Timestamp = time.Now().UTC()
+		record.Timestamp = time.Now().UTC().Truncate(time.Microsecond)
+	} else {
+		record.Timestamp = record.Timestamp.Truncate(time.Microsecond)
 	}
 
 	if record.EventType == "" {
@@ -284,12 +286,17 @@ func (s *PostgresStore) GetLatestRecord(ctx context.Context, workspaceID string)
 }
 
 // ListRecords returns up to limit records for a workspace in descending sequence order.
+// When limit <= 0, all records for the workspace are returned.
 func (s *PostgresStore) ListRecords(ctx context.Context, workspaceID string, limit int) ([]StoredRecord, error) {
+	var rows pgx.Rows
+	var err error
 	if limit <= 0 {
-		limit = 100
+		query := fmt.Sprintf(`SELECT %s FROM audit_events WHERE workspace_id = $1 ORDER BY sequence_number DESC`, selectFields)
+		rows, err = s.pool.Query(ctx, query, workspaceID)
+	} else {
+		query := fmt.Sprintf(`SELECT %s FROM audit_events WHERE workspace_id = $1 ORDER BY sequence_number DESC LIMIT $2`, selectFields)
+		rows, err = s.pool.Query(ctx, query, workspaceID, limit)
 	}
-	query := fmt.Sprintf(`SELECT %s FROM audit_events WHERE workspace_id = $1 ORDER BY sequence_number DESC LIMIT $2`, selectFields)
-	rows, err := s.pool.Query(ctx, query, workspaceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("audit: query list records: %w", err)
 	}

@@ -90,6 +90,7 @@ func (m *Manager) CreateCandidate(ctx context.Context, workspaceID, content, des
 		Action:      auditevents.ActionCreateCandidate,
 		NewVersion:  version,
 		Timestamp:   time.Now(),
+		OperatorID:  auditevents.ActorFromContext(ctx),
 	})
 
 	return rec, nil
@@ -121,6 +122,7 @@ func (m *Manager) CreateCandidateWithVersion(ctx context.Context, workspaceID, v
 		Action:      auditevents.ActionCreateCandidate,
 		NewVersion:  version,
 		Timestamp:   time.Now(),
+		OperatorID:  auditevents.ActorFromContext(ctx),
 	})
 
 	return rec, nil
@@ -157,6 +159,7 @@ func (m *Manager) Activate(ctx context.Context, workspaceID, version string) (po
 		PreviousVersion: prevVersion,
 		NewVersion:      version,
 		Timestamp:       time.Now(),
+		OperatorID:      auditevents.ActorFromContext(ctx),
 	})
 
 	return m.store.GetActivePolicy(ctx, workspaceID)
@@ -191,6 +194,7 @@ func (m *Manager) Rollback(ctx context.Context, workspaceID, targetVersion strin
 		PreviousVersion: rolledBackFrom,
 		NewVersion:      targetVersion,
 		Timestamp:       time.Now(),
+		OperatorID:      auditevents.ActorFromContext(ctx),
 	})
 
 	return m.store.GetActivePolicy(ctx, workspaceID)

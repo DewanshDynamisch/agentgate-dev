@@ -1,0 +1,42 @@
+/*
+  AgentGate shared design tokens
+*/
+:root {
+  --ag-bg-canvas: #f5f6fa;
+  --ag-bg-surface: #ffffff;
+  --ag-border: #e4e4e7;
+  --ag-text-primary: #18181b;
+  --ag-text-secondary: #6e6e76;
+  --ag-text-inverse: #ffffff;
+  --ag-accent: #4338ca;
+  --ag-accent-hover: #3730a3;
+  --ag-accent-soft: #e0e7ff;
+  --ag-allow: #15803d;
+  --ag-allow-soft: #f0fdf4;
+  --ag-deny: #b91c1c;
+  --ag-deny-soft: #fef2f2;
+  --ag-candidate: #a16207;
+  --ag-candidate-soft: #fefce8;
+  --ag-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --ag-font-mono: "Geist Mono", ui-monospace, "IBM Plex Mono", monospace;
+}
+
+[data-theme="dark"] {
+  --ag-bg-canvas: #09090b;
+  --ag-bg-surface: #18181b;
+  --ag-border: #27272a;
+  --ag-text-primary: #f4f4f5;
+  --ag-text-secondary: #a1a1aa;
+  --ag-text-inverse: #09090b;
+  --ag-accent: #818cf8;
+  --ag-accent-hover: #6366f1;
+  --ag-accent-soft: #312e81;
+  --ag-allow: #4ade80;
+  --ag-allow-soft: #064e3b;
+  --ag-deny: #f87171;
+  --ag-deny-soft: #450a0a;
+  --ag-candidate: #facc15;
+  --ag-candidate-soft: #713f12;
+  --ag-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --ag-font-mono: "Geist Mono", ui-monospace, "IBM Plex Mono", monospace;
+}

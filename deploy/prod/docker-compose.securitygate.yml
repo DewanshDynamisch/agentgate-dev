@@ -1,0 +1,8 @@
+# deploy/prod/docker-compose.securitygate.yml
+# Override file extending docker-compose.yml for v1 live security gate suite.
+# Enables test-only credential inspection on support-desk-mcp.
+
+services:
+  support-desk-mcp:
+    environment:
+      DEMO_MCP_EXPOSE_LAST_CREDENTIAL_FOR_TESTS: "true"

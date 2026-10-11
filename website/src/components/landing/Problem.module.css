@@ -1,0 +1,17 @@
+.problemSection {
+  padding: 4rem 0;
+}
+
+.statements {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.statement {
+  flex: 1;
+  min-width: 250px;
+  padding: 1.5rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: var(--ifm-global-radius);
+}

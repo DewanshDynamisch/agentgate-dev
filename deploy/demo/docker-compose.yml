@@ -51,7 +51,15 @@ services:
       AGENTGATE_LOG_LEVEL: "debug"
       AGENTGATE_ADMIN_TOKEN: "${AGENTGATE_ADMIN_TOKEN:-agentgate-admin-secret-dev}"
       AGENTGATE_AUDIT_SALT: "${AGENTGATE_AUDIT_SALT:-audit-salt-demo-dev-fixture}"
+      AGENTGATE_CREDENTIAL_AUDIENCES: "mcp-probe=support-desk,default=support-desk"
+      AGENTGATE_CREDENTIAL_SIGNING_KEY_FILE: "/run/secrets/cred_key.pem"
+      AGENTGATE_REQUIRE_DOWNSTREAM_CREDENTIAL: "true"
+      AGENTGATE_TOOL_BOOTSTRAP_FILE: "/etc/agentgate/tools.bootstrap.json"
       AGENTGATE_DATABASE_URL: "${AGENTGATE_DATABASE_URL:-postgres://${POSTGRES_USER:-agentgate}:${POSTGRES_PASSWORD:-agentgate-dev-password}@postgres:5432/${POSTGRES_DB:-agentgate_demo_db}?sslmode=disable}"
+    volumes:
+      # Generated at runtime by run-demo-e2e.ps1; never committed.
+      - ./secrets/cred_key.pem:/run/secrets/cred_key.pem:ro
+      - ../shared/tools.bootstrap.json:/etc/agentgate/tools.bootstrap.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,12 +78,13 @@ services:
       dockerfile: Dockerfile
     image: agentgate/demo-support-desk-mcp:dev
     container_name: demo-support-desk-mcp
-    ports:
-      - "9200:9200"
+    # No host port: the backend is reachable only through the gateway.
     environment:
       DEMO_MCP_PORT: "9200"
+      DEMO_MCP_JWKS_URL: "http://agentgate:8090/.well-known/jwks.json"
+      DEMO_MCP_REQUIRE_CREDENTIAL: "true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9200/healthz"]
+      test: ["CMD", "/app/support-desk-mcp", "healthcheck"]
       interval: 2s
       timeout: 2s
       retries: 5

@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { X } from "lucide-react";
-import { useGovernance } from "../../state/GovernanceProvider";
+import { useGovernance, useGovernanceClient } from "../../state/GovernanceProvider";
+import { computeStats } from "../../lib/auditStats";
+import { DECISION_LIMIT, loadRecentDecisions } from "../../lib/loadDecisions";
+import type { AuditEvent } from "@contract/models/audit";
 import { toLifecycleSummaryView } from "@contract/view/policy-lifecycle-view";
 import { StatusDot, type StatusTone } from "../../components/ui/StatusDot";
 import type { PolicyRecord } from "@contract/models/governance";
+import { usePageTitle } from "../../lib/usePageTitle";
 
 const STATE_TONE: Record<PolicyRecord["state"], StatusTone> = {
   active: "allow",
@@ -18,8 +22,49 @@ function formatVersion(version: string | undefined): string {
   return `${version.slice(0, 12)}...${version.slice(-8)}`;
 }
 
+function formatHour(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function DashboardPage() {
+  usePageTitle("Dashboard");
   const { state, ready } = useGovernance();
+  const { client, workspaceId } = useGovernanceClient();
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [toolCount, setToolCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadRecentDecisions(client, workspaceId)
+      .then((res) => {
+        if (!cancelled) setEvents(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setAuditError(err instanceof Error ? err.message : "Failed to load audit events");
+      })
+      .finally(() => {
+        if (!cancelled) setAuditLoading(false);
+      });
+    client
+      .listTools()
+      .then((tools) => {
+        if (!cancelled) setToolCount(tools.length);
+      })
+      .catch(() => {
+        if (!cancelled) setToolCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, workspaceId]);
+
+  // `now` is captured when the loaded events change so the 24h window matches the data.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stats = useMemo(() => computeStats(events, new Date()), [events]);
+  const maxBucket = Math.max(1, ...stats.last24hBuckets.map((b) => b.allowed + b.denied));
   const summary = toLifecycleSummaryView(state.workspaceId, state.policies);
   const activePolicy = state.policies.find((p) => p.state === "active");
   const [showActivePolicy, setShowActivePolicy] = useState(false);
@@ -58,6 +103,7 @@ export function DashboardPage() {
             <div className="ag-stat-card">
               <div className="ag-stat-label" style={{ color: "var(--ag-allow)" }}>Active version</div>
               <div
+                data-testid="stat-active-version"
                 className="ag-stat-value ag-stat-value-hash ag-mono"
                 style={{ fontSize: 18, color: "var(--ag-allow)" }}
                 title={summary.activeVersion ?? "No active policy"}
@@ -70,10 +116,100 @@ export function DashboardPage() {
               <div className="ag-stat-value" style={{ color: "var(--ag-candidate)" }}>{summary.candidateCount}</div>
             </div>
             <div className="ag-stat-card">
-              <div className="ag-stat-label">Historical</div>
-              <div className="ag-stat-value">{summary.historicalCount}</div>
+              <div className="ag-stat-label">Catalog tools</div>
+              <div className="ag-stat-value" data-testid="stat-tools">{toolCount ?? "—"}</div>
             </div>
           </div>
+
+          <section aria-labelledby="audit-activity-title" style={{ marginBottom: 28 }}>
+            <h2 id="audit-activity-title" style={{ fontSize: 14, fontWeight: 500, margin: "0 0 12px" }}>
+              Authorization activity{" "}
+              <span style={{ color: "var(--ag-text-secondary)", fontWeight: 400 }}>(last {DECISION_LIMIT} decisions)</span>
+            </h2>
+            {auditError && (
+              <div className="ag-alert ag-alert-error" role="alert">{auditError}</div>
+            )}
+            {auditLoading && <div className="ag-empty">Loading audit decisions&hellip;</div>}
+            {!auditLoading && !auditError && stats.total === 0 && (
+              <div className="ag-empty">No decisions recorded yet.</div>
+            )}
+            {!auditLoading && stats.total > 0 && (
+              <>
+                <div className="ag-stat-grid">
+                  <div className="ag-stat-card">
+                    <div className="ag-stat-label">Decisions</div>
+                    <div className="ag-stat-value" data-testid="stat-total">{stats.total}</div>
+                  </div>
+                  <div className="ag-stat-card">
+                    <div className="ag-stat-label" style={{ color: "var(--ag-allow)" }}>Allowed</div>
+                    <div className="ag-stat-value" data-testid="stat-allowed" style={{ color: "var(--ag-allow)" }}>{stats.allowed}</div>
+                  </div>
+                  <div className="ag-stat-card">
+                    <div className="ag-stat-label" style={{ color: "var(--ag-deny)" }}>Denied</div>
+                    <div className="ag-stat-value" data-testid="stat-denied" style={{ color: "var(--ag-deny)" }}>{stats.denied}</div>
+                  </div>
+                  <div className="ag-stat-card">
+                    <div className="ag-stat-label">Deny rate</div>
+                    <div className="ag-stat-value" data-testid="stat-deny-rate">{Math.round(stats.denyRate * 100)}%</div>
+                  </div>
+                </div>
+
+                <h3 style={{ fontSize: 13, fontWeight: 500, margin: "0 0 8px" }}>Decisions per hour (last 24h)</h3>
+                <div
+                  role="img"
+                  aria-label="Allowed and denied decisions per hour over the last 24 hours"
+                  style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 96, marginBottom: 20 }}
+                >
+                  {stats.last24hBuckets.map((b) => (
+                    <div
+                      key={b.hourStartIso}
+                      title={`${formatHour(b.hourStartIso)}: ${b.allowed} allowed, ${b.denied} denied`}
+                      style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}
+                    >
+                      <div style={{ height: `${(b.denied / maxBucket) * 100}%`, background: "var(--ag-deny)" }} />
+                      <div style={{ height: `${(b.allowed / maxBucket) * 100}%`, background: "var(--ag-allow)" }} />
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                  <div>
+                    <h3 style={{ fontSize: 13, fontWeight: 500, margin: "0 0 8px" }}>Top tools</h3>
+                    <table className="ag-table">
+                      <tbody>
+                        {stats.topTools.map((t) => (
+                          <tr key={t.tool}>
+                            <td className="ag-mono">{t.tool}</td>
+                            <td>{t.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 13, fontWeight: 500, margin: "0 0 8px" }}>Top deny reasons</h3>
+                    {Object.keys(stats.byReason).length === 0 ? (
+                      <div className="ag-empty">No denials.</div>
+                    ) : (
+                      <table className="ag-table">
+                        <tbody>
+                          {Object.entries(stats.byReason)
+                            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                            .slice(0, 5)
+                            .map(([reason, count]) => (
+                              <tr key={reason}>
+                                <td className="ag-mono">{reason}</td>
+                                <td>{count}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
 
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
             <div>

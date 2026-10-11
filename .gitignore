@@ -34,3 +34,4 @@ Thumbs.db
 
 # Local Codex/Git worktrees
 .worktrees/
+.superpowers/

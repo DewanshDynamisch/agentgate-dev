@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  HttpGovernanceClient,
   MockGovernanceClient,
   type GovernanceClient,
 } from "@contract/api/governanceClient";
@@ -23,6 +22,14 @@ import type {
   ValidateResponse,
 } from "@contract/models/governance";
 import { seedDemoPolicies } from "./seedDemoData";
+import { selectClientMode } from "../lib/clientMode";
+import { getConfig } from "../auth/config";
+import { getAccessToken } from "../auth/oidc";
+import { createHttpGovernanceClient } from "../auth/governanceHttp";
+import { useAuth } from "./AuthProvider";
+import { shouldReauth } from "./reauth";
+
+
 
 const WORKSPACE_ID = "default";
 
@@ -42,6 +49,13 @@ interface GovernanceContextValue {
 
 const GovernanceContext = createContext<GovernanceContextValue | null>(null);
 
+interface GovernanceClientContextValue {
+  client: GovernanceClient;
+  workspaceId: string;
+}
+
+const GovernanceClientContext = createContext<GovernanceClientContextValue | null>(null);
+
 /**
  * Owns one PolicyLifecycleStore instance (from the existing, tested contract
  * layer at frontend/src) for the lifetime of the app. The store class itself
@@ -51,13 +65,22 @@ const GovernanceContext = createContext<GovernanceContextValue | null>(null);
  * never call the store directly.
  */
 export function GovernanceProvider({ children }: { children: ReactNode }) {
-  const apiUrl = import.meta.env.VITE_API_URL || "";
-  const adminToken = import.meta.env.VITE_ADMIN_TOKEN || "";
-  const useMock = import.meta.env.VITE_USE_MOCK === "true" || !adminToken;
-  const client: GovernanceClient = useMemo(
-    () => (useMock ? new MockGovernanceClient() : new HttpGovernanceClient(apiUrl, adminToken)),
-    [adminToken, apiUrl, useMock]
-  );
+  const apiUrl = getConfig().apiUrl;
+  const { login } = useAuth();
+  const loginRef = useRef(login);
+  loginRef.current = login;
+  // Mock only in tests or an explicit dev opt-in; production builds always use HTTP.
+  const useMock = selectClientMode(import.meta.env) === "mock";
+  const client: GovernanceClient = useMemo(() => {
+    if (useMock) return new MockGovernanceClient();
+    // A 401 restarts SSO. Rate-limited so a token the API keeps rejecting
+    // (e.g. missing role) cannot cause an endless redirect loop.
+    const onUnauthorized = () => {
+      if (!shouldReauth()) return;
+      void loginRef.current().catch(() => undefined);
+    };
+    return createHttpGovernanceClient(apiUrl, getAccessToken, onUnauthorized);
+  }, [apiUrl, useMock]);
   const storeRef = useRef<PolicyLifecycleStore>(new PolicyLifecycleStore(client, WORKSPACE_ID));
   const [state, setState] = useState<PolicyLifecycleState>(storeRef.current.getState());
   const [ready, setReady] = useState(false);
@@ -71,7 +94,7 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initialize = async () => {
-      if (useMock) {
+      if (useMock && !import.meta.env.PROD) {
         await seedDemoPolicies(client, WORKSPACE_ID);
       }
       await loadPolicies();
@@ -113,13 +136,28 @@ export function GovernanceProvider({ children }: { children: ReactNode }) {
     },
   };
 
-  return <GovernanceContext.Provider value={value}>{children}</GovernanceContext.Provider>;
+  const clientValue = useMemo(() => ({ client, workspaceId: WORKSPACE_ID }), [client]);
+
+  return (
+    <GovernanceClientContext.Provider value={clientValue}>
+      <GovernanceContext.Provider value={value}>{children}</GovernanceContext.Provider>
+    </GovernanceClientContext.Provider>
+  );
 }
 
 export function useGovernance(): GovernanceContextValue {
   const ctx = useContext(GovernanceContext);
   if (!ctx) {
     throw new Error("useGovernance() must be used inside <GovernanceProvider>");
+  }
+  return ctx;
+}
+
+/** The provider-owned GovernanceClient and workspace, for pages that read data the policy store does not hold. */
+export function useGovernanceClient(): GovernanceClientContextValue {
+  const ctx = useContext(GovernanceClientContext);
+  if (!ctx) {
+    throw new Error("useGovernanceClient() must be used inside <GovernanceProvider>");
   }
   return ctx;
 }

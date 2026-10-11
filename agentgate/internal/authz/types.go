@@ -8,6 +8,7 @@ import (
 	"github.com/Dynamisch-LLC/agentgate/internal/argdecl"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 	"github.com/Dynamisch-LLC/agentgate/internal/identity"
+	"github.com/Dynamisch-LLC/agentgate/internal/toolcatalog"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolregistry"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 )
@@ -31,6 +32,12 @@ type WorkspaceResolver interface {
 	ResolveWorkspace(ctx context.Context, checkReq *authv3.CheckRequest, claims map[string]string) (string, error)
 }
 
+// ToolCatalog supplies the live tool snapshot. Adapt takes exactly one
+// Current() per request.
+type ToolCatalog interface {
+	Current() *toolcatalog.Snapshot
+}
+
 // AdapterConfig configures the ext_authz to decision.Request adapter.
 type AdapterConfig struct {
 	DefaultWorkspaceID   string
@@ -40,13 +47,20 @@ type AdapterConfig struct {
 	IdentityMapper       *identity.Mapper
 	ToolRegistry         *toolregistry.Registry
 	ArgDeclarations      map[string]*argdecl.DeclarationSet
+	// Catalog, when non-nil, takes precedence over ToolRegistry and
+	// ArgDeclarations; declarations are keyed backendID/toolName.
+	Catalog ToolCatalog
 }
 
 // AdapterError describes why an ext_authz check cannot be translated into a valid decision.Request.
 type AdapterError struct {
-	ReasonCode decision.ReasonCode
-	Message    string
-	Err        error
+	ReasonCode  decision.ReasonCode
+	Message     string
+	Err         error
+	ToolName    string
+	BackendID   string
+	WorkspaceID string
+	Identity    decision.Identity
 }
 
 func (e *AdapterError) Error() string {

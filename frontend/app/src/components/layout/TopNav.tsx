@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../../state/AuthProvider";
+import { useTheme } from "../../state/ThemeProvider";
 import { QuickSearch } from "./QuickSearch";
 
 interface NavItem {
@@ -20,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export function TopNav() {
   const { logout } = useAuth();
+  const { preference, setPreference } = useTheme();
 
   return (
     <header className="ag-topbar">
@@ -45,10 +47,19 @@ export function TopNav() {
       </nav>
 
       <div className="ag-topbar-right">
+        <select
+          value={preference}
+          onChange={(e) => setPreference(e.target.value as any)}
+          style={{ marginRight: 8, padding: '2px 4px', borderRadius: 'var(--ag-radius-control)', border: '1px solid var(--ag-border)', background: 'var(--ag-bg-surface)', color: 'var(--ag-text-primary)' }}
+        >
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
         <QuickSearch />
         <div className="ag-topbar-divider" />
         <button
-          onClick={logout}
+          onClick={() => void logout()}
           title="Sign out"
           className="ag-avatar"
           style={{ border: "none", cursor: "pointer", fontFamily: "inherit" }}

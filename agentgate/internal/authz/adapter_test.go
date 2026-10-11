@@ -475,3 +475,51 @@ func TestAdapter_UndeclaredArgumentsIgnored(t *testing.T) {
 		t.Errorf("expected verbose=true, got %v", decisionReq.Arguments)
 	}
 }
+
+func TestAdapter_ListRolesClaim(t *testing.T) {
+	adapter := setupTestAdapter(t)
+
+	s, err := structpb.NewStruct(map[string]any{
+		"sub":   "agent-001",
+		"roles": []any{"reader", "admin"},
+	})
+	if err != nil {
+		t.Fatalf("failed to create structpb: %v", err)
+	}
+	metadata := &corev3.Metadata{
+		FilterMetadata: map[string]*structpb.Struct{
+			"envoy.filters.http.jwt_authn": s,
+		},
+	}
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Method: "POST",
+					Path:   "/",
+					Body:   `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_status","arguments":{"verbose":true}}}`,
+				},
+			},
+			MetadataContext: metadata,
+		},
+	}
+
+	decisionReq, aerr := adapter.Adapt(context.Background(), req)
+	if aerr != nil {
+		t.Fatalf("unexpected adapter error: %v", aerr)
+	}
+
+	if decisionReq.Identity.AgentID != "agent-001" {
+		t.Errorf("expected AgentID 'agent-001', got %q", decisionReq.Identity.AgentID)
+	}
+	expectedRoles := []string{"reader", "admin"}
+	if len(decisionReq.Identity.Roles) != len(expectedRoles) {
+		t.Fatalf("expected roles %v, got %v", expectedRoles, decisionReq.Identity.Roles)
+	}
+	for i, r := range expectedRoles {
+		if decisionReq.Identity.Roles[i] != r {
+			t.Errorf("role[%d]: expected %q, got %q", i, r, decisionReq.Identity.Roles[i])
+		}
+	}
+}

@@ -47,7 +47,7 @@ func ComputeCanonicalPayload(record DecisionRecord) ([]byte, error) {
 
 	tsStr := ""
 	if !record.Timestamp.IsZero() {
-		tsStr = record.Timestamp.UTC().Format(time.RFC3339Nano)
+		tsStr = record.Timestamp.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	}
 
 	eventType := record.EventType

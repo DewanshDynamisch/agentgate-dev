@@ -1,0 +1,26 @@
+.section {
+  padding: 4rem 0;
+  background-color: var(--ifm-color-emphasis-100);
+  text-align: center;
+}
+
+.terminal {
+  background: var(--ifm-color-emphasis-900);
+  color: var(--ifm-color-emphasis-0);
+  padding: 1.5rem;
+  border-radius: var(--ifm-global-radius);
+  max-width: 800px;
+  margin: 2rem auto;
+  text-align: left;
+  overflow-x: auto;
+}
+
+.terminal pre {
+  margin: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.action {
+  margin-top: 2rem;
+}

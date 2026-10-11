@@ -176,11 +176,8 @@ type ToolView struct {
 	RegisteredFingerprint string     `json:"registered_fingerprint"`
 }
 
-// ToolsResponse is the response for GET .../tools. Source is always
-// "static_configuration": this registry is a static, startup-loaded list —
-// it does not discover tools from live traffic (see toolregistry.Registry.List's
-// own doc comment). An unclassified live tool still fails closed at
-// enforcement time; it simply never appears in this listing.
+// ToolsResponse is the response for GET .../tools. Source is "catalog" when
+// backed by the runtime tool catalog, else "static_configuration".
 type ToolsResponse struct {
 	WorkspaceID string     `json:"workspace_id"`
 	Source      string     `json:"source"`

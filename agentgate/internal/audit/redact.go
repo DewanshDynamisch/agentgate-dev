@@ -48,6 +48,13 @@ func NewRedactor(salt string, rules map[string]map[string]RedactionMode) *Redact
 	if salt == "" {
 		salt = os.Getenv("AGENTGATE_AUDIT_SALT")
 		if salt == "" {
+			if file := os.Getenv("AGENTGATE_AUDIT_SALT_FILE"); file != "" {
+				if data, err := os.ReadFile(strings.TrimSpace(file)); err == nil {
+					salt = strings.TrimSpace(string(data))
+				}
+			}
+		}
+		if salt == "" {
 			salt = "default-agentgate-audit-salt"
 		}
 	}

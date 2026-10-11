@@ -1,28 +1,40 @@
 package govapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
+	"github.com/Dynamisch-LLC/agentgate/internal/auditevents"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
 	"github.com/Dynamisch-LLC/agentgate/internal/governanceintegration"
+	"github.com/Dynamisch-LLC/agentgate/internal/metrics"
 	"github.com/Dynamisch-LLC/agentgate/internal/policy"
 	"github.com/Dynamisch-LLC/agentgate/internal/policymanager"
 	"github.com/Dynamisch-LLC/agentgate/internal/policystore"
+	"github.com/Dynamisch-LLC/agentgate/internal/ratelimit"
 	"github.com/Dynamisch-LLC/agentgate/internal/toolregistry"
 )
 
 // Handler serves policy governance REST endpoints.
 type Handler struct {
-	manager        *policymanager.Manager
-	govIntegration *governanceintegration.GovernanceDecisionService
-	auditStore     audit.Store
-	toolRegistry   *toolregistry.Registry
-	adminToken     string
+	manager            *policymanager.Manager
+	govIntegration     *governanceintegration.GovernanceDecisionService
+	auditStore         audit.Store
+	toolRegistry       *toolregistry.Registry
+	toolCatalog        ToolCatalogService
+	catalogMu          sync.Mutex
+	adminToken         string
+	auth               AdminAuthenticator
+	limiter            *ratelimit.Limiter
+	adminRequestsTotal *metrics.CounterVec
 }
 
 // NewHandler constructs a new Handler.
@@ -37,31 +49,164 @@ func NewHandler(manager *policymanager.Manager, adminToken string, govIntegratio
 		auditStore:     auditStore,
 		toolRegistry:   toolRegistry,
 		adminToken:     adminToken,
+		limiter:        ratelimit.New(20, 40),
 	}
+}
+
+// NewHandlerWithCatalog constructs a Handler whose tool endpoints are backed by
+// a runtime tool catalog. The catalog snapshot replaces the static registry.
+func NewHandlerWithCatalog(manager *policymanager.Manager, adminToken string, govIntegration *governanceintegration.GovernanceDecisionService, auditStore audit.Store, catalog ToolCatalogService) *Handler {
+	h := NewHandler(manager, adminToken, govIntegration, auditStore, nil)
+	h.toolCatalog = catalog
+	return h
+}
+
+// SetAuthenticator replaces the default static-token authenticator (e.g. with
+// OIDC). It must be called before RegisterRoutes.
+func (h *Handler) SetAuthenticator(a AdminAuthenticator) { h.auth = a }
+
+// SetRateLimiter sets the rate limiter for governance routes.
+func (h *Handler) SetRateLimiter(l *ratelimit.Limiter) { h.limiter = l }
+
+// SetMetrics sets the counter for admin API requests.
+func (h *Handler) SetMetrics(counter *metrics.CounterVec) { h.adminRequestsTotal = counter }
+
+func (h *Handler) authenticator() AdminAuthenticator {
+	if h.auth != nil {
+		return h.auth
+	}
+	return NewStaticTokenAuthenticator(h.adminToken)
+}
+
+const bodyLimitBytes = 1 << 20 // 1 MiB
+
+func (h *Handler) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.limiter != nil {
+			key := clientIP(r)
+			if p, ok := PrincipalFromContext(r.Context()); ok && p.Subject != "" {
+				key = p.Subject
+			} else if auth := h.authenticator(); auth != nil {
+				if p, err := auth.Authenticate(r); err == nil && p.Subject != "" {
+					key = p.Subject
+					ctx := context.WithValue(r.Context(), principalCtxKey{}, p)
+					ctx = auditevents.WithActor(ctx, p.ActorName())
+					r = r.WithContext(ctx)
+				}
+			}
+			if !h.limiter.Allow(key) {
+				w.Header().Set("Retry-After", "1")
+				writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func (h *Handler) bodyLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > bodyLimitBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds 1 MiB")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, bodyLimitBytes)
+		next(w, r)
+	}
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if client := strings.TrimSpace(parts[0]); client != "" {
+			return client
+		}
+	}
+	if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+		return xrip
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && strings.TrimSpace(host) != "" {
+		return strings.TrimSpace(host)
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds 1 MiB")
+			return err
+		}
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+		return err
+	}
+	return nil
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode  int
+	wroteHeader bool
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.statusCode = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // RegisterRoutes registers the policy governance routes on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	protect := func(fn http.HandlerFunc) http.HandlerFunc {
-		return AdminAuthMiddleware(h.adminToken, fn)
+	protect := func(pattern string, fn http.HandlerFunc) http.HandlerFunc {
+		wrapped := h.rateLimitMiddleware(h.bodyLimitMiddleware(AdminAuthMiddlewareWith(h.authenticator(), fn)))
+		return func(w http.ResponseWriter, r *http.Request) {
+			if h.adminRequestsTotal == nil {
+				wrapped(w, r)
+				return
+			}
+			rw := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			wrapped(rw, r)
+			h.adminRequestsTotal.Inc(pattern, strconv.Itoa(rw.statusCode))
+		}
 	}
 
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/validate", protect(h.handleValidate))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/rollback", protect(h.handleRollback))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/activate", protect(h.handleActivate))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/preview", protect(h.handlePreview))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies/{version}/dryrun", protect(h.handleDryRunCompare))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/policies/{version}", protect(h.handleGetPolicy))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/policies", protect(h.handleListPolicies))
-	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/policies", protect(h.handleCreateCandidate))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/audit-events", protect(h.handleListAuditEvents))
-	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/tools", protect(h.handleListTools))
+	register := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, protect(pattern, fn))
+	}
+
+	register("POST /api/v1/workspaces/{workspace_id}/policies/validate", h.handleValidate)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/rollback", h.handleRollback)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/activate", h.handleActivate)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/preview", h.handlePreview)
+	register("POST /api/v1/workspaces/{workspace_id}/policies/{version}/dryrun", h.handleDryRunCompare)
+	register("GET /api/v1/workspaces/{workspace_id}/policies/{version}", h.handleGetPolicy)
+	register("GET /api/v1/workspaces/{workspace_id}/policies", h.handleListPolicies)
+	register("POST /api/v1/workspaces/{workspace_id}/policies", h.handleCreateCandidate)
+	register("GET /api/v1/workspaces/{workspace_id}/audit-events", h.handleListAuditEvents)
+	register("GET /api/v1/workspaces/{workspace_id}/tools", h.handleListTools)
+	register("GET /api/v1/tools", h.handleCatalogList)
+	register("GET /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogGet)
+	register("PUT /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogPut)
+	register("DELETE /api/v1/tools/{backend_id}/{tool_name}", h.handleCatalogDelete)
 }
 
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req ValidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -88,8 +233,7 @@ func (h *Handler) handleCreateCandidate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req CreateCandidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -188,8 +332,7 @@ func (h *Handler) handleRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RollbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -227,8 +370,7 @@ func (h *Handler) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req PreviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -281,8 +423,7 @@ func (h *Handler) handleDryRunCompare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DryRunCompareRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
 
@@ -430,12 +571,18 @@ func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.toolRegistry == nil {
+	source := "static_configuration"
+	var records []toolregistry.GovernanceRecord
+	switch {
+	case h.toolCatalog.Catalog != nil:
+		source = "catalog"
+		records = h.toolCatalog.Catalog.Current().Registry.List()
+	case h.toolRegistry != nil:
+		records = h.toolRegistry.List()
+	default:
 		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "tool registry not configured")
 		return
 	}
-
-	records := h.toolRegistry.List()
 	tools := make([]ToolView, 0, len(records))
 	for _, rec := range records {
 		tools = append(tools, ToolView{
@@ -451,7 +598,7 @@ func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, ToolsResponse{
 		WorkspaceID: workspaceID,
-		Source:      "static_configuration",
+		Source:      source,
 		Tools:       tools,
 	})
 }

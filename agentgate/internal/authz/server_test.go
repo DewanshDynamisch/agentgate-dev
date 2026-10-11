@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Dynamisch-LLC/agentgate/internal/audit"
 	"github.com/Dynamisch-LLC/agentgate/internal/decision"
@@ -298,3 +299,63 @@ func TestAuthzServer_AdapterError_Audited(t *testing.T) {
 		t.Errorf("expected audited decision DENY, got %q", latest.Decision)
 	}
 }
+
+type slowFakeEvaluator struct{}
+
+func (s *slowFakeEvaluator) Evaluate(ctx context.Context, req decision.Request) (decision.Result, error) {
+	select {
+	case <-time.After(5 * time.Second):
+		return decision.Result{Decision: decision.Allow, Reason: decision.ReasonPolicyAllow}, nil
+	case <-ctx.Done():
+		return decision.Result{}, ctx.Err()
+	}
+}
+
+func TestCheck_SlowEvaluatorTimesOut(t *testing.T) {
+	adapter := setupTestAdapter(t)
+	slowEval := &slowFakeEvaluator{}
+	srv := NewServer(adapter, slowEval)
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Method: "POST",
+					Path:   "/",
+					Body:   `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_status","arguments":{"verbose":true}}}`,
+				},
+			},
+			MetadataContext: newTestJWTMetadata(t, "agent-001", "reader"),
+		},
+	}
+
+	start := time.Now()
+	resp, err := srv.Check(context.Background(), req)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected Check error: %v", err)
+	}
+	if resp.Status.Code != int32(codes.PermissionDenied) {
+		t.Fatalf("expected Status.Code == PermissionDenied, got %d", resp.Status.Code)
+	}
+	if resp.GetDeniedResponse() == nil {
+		t.Fatal("expected DeniedResponse, got nil")
+	}
+
+	// Must return within ~3s, not 5s
+	if elapsed < 2500*time.Millisecond || elapsed > 4500*time.Millisecond {
+		t.Fatalf("expected Check to return within ~3s (between 2.5s and 4.5s), took %v", elapsed)
+	}
+
+	hasDenyReason := false
+	for _, h := range resp.GetDeniedResponse().Headers {
+		if h.Header.Key == "x-agentgate-reason" && h.Header.Value == "evaluation_error" {
+			hasDenyReason = true
+		}
+	}
+	if !hasDenyReason {
+		t.Errorf("expected x-agentgate-reason == evaluation_error header in response")
+	}
+}
+

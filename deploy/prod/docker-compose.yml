@@ -1,0 +1,301 @@
+# deploy/prod/docker-compose.yml — AgentGate Production Compose Topology
+#
+# Topology:
+# - postgres: PostgreSQL 16 Alpine with privilege separation (migrator vs restricted app user). Internal only.
+# - keycloak: Keycloak 26 production start, pre-imports realm-agentgate.json. Published on 8443.
+# - migrate: agentgate image running 'migrate' with migrator credentials, exits 0.
+# - agentgate: core gateway daemon running 'serve' with AGENTGATE_ENV=production, app role DB,
+#              Envoy ext_authz mTLS (:9001 internal), metrics (:9090 internal), admin API HTTPS (:8090 -> 9443).
+# - agentgateway: pinned v1.4.0 proxy, TLS listener on 3000 -> 3443, strict JWT auth against Keycloak JWKS,
+#                 mTLS ext_authz to agentgate:9001.
+# - support-desk-mcp: backend service requiring downstream minted credentials. Internal only.
+# - admin-ui: SPA dashboard with nginx TLS termination on 8443 -> 8444, dynamic CSP and runtime config.
+
+name: agentgate-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/postgres_password"
+      POSTGRES_DB: "${POSTGRES_DB:-agentgate_prod_db}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-prod-db.sh:/docker-entrypoint-initdb.d/01-init-prod-db.sh:ro
+    secrets:
+      - postgres_password
+      - migrator_password
+      - app_password
+      - keycloak_db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agentgate_prod_db}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    networks:
+      - agentgate-prod
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: prod-keycloak
+    restart: unless-stopped
+    command:
+      - "start"
+      - "--optimized=false"
+      - "--import-realm"
+      - "--hostname=${KC_HOSTNAME:-https://keycloak:8443}"
+      - "--hostname-strict=false"
+      - "--https-certificate-file=/run/secrets/keycloak.crt"
+      - "--https-certificate-key-file=/run/secrets/keycloak.key"
+    environment:
+      KC_DB: "postgres"
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/keycloak"
+      KC_DB_USERNAME: "keycloak"
+      KC_DB_PASSWORD: "${KEYCLOAK_DB_PASSWORD}"
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
+      ADMIN_INITIAL_PASSWORD: "${ADMIN_INITIAL_PASSWORD}"
+      AGENT_READER_CLIENT_SECRET: "${AGENT_READER_CLIENT_SECRET}"
+      AGENT_ADMIN_CLIENT_SECRET: "${AGENT_ADMIN_CLIENT_SECRET}"
+      OPS_CLI_CLIENT_SECRET: "${OPS_CLI_CLIENT_SECRET}"
+    volumes:
+      - ./keycloak/realm-agentgate.json:/opt/keycloak/data/import/realm-agentgate.json:ro
+    secrets:
+      - keycloak.crt
+      - keycloak.key
+      - keycloak_db_password
+      - kc_admin_password
+      - admin_initial_password
+    ports:
+      - "8443:8443"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8443'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    networks:
+      - agentgate-prod
+
+  migrate:
+    image: agentgate/agentgate:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.agentgate
+    container_name: prod-migrate
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      AGENTGATE_DATABASE_URL: "${AGENTGATE_MIGRATOR_DATABASE_URL:-postgres://agentgate_migrator:${AGENTGATE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentgate_prod_db}?sslmode=disable}"
+      AGENTGATE_ENV: "development"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - agentgate-prod
+
+  agentgate:
+    image: agentgate/agentgate:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.agentgate
+    container_name: prod-agentgate
+    command: ["serve"]
+    restart: unless-stopped
+    environment:
+      AGENTGATE_ENV: "production"
+      AGENTGATE_HTTP_ADDR: ":8090"
+      AGENTGATE_AUTHZ_GRPC_ADDR: ":9001"
+      AGENTGATE_METRICS_ADDR: ":9090"
+      AGENTGATE_LOG_LEVEL: "${AGENTGATE_LOG_LEVEL:-info}"
+      AGENTGATE_DATABASE_URL: "${AGENTGATE_DATABASE_URL:-postgres://agentgate_app:${AGENTGATE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentgate_prod_db}?sslmode=disable}"
+      AGENTGATE_DB_ALLOW_INSECURE: "true"
+      AGENTGATE_AUTO_MIGRATE: "false"
+      AGENTGATE_AUDIT_SALT_FILE: "/run/secrets/audit_salt"
+      AGENTGATE_AUDIT_SALT: "${AGENTGATE_AUDIT_SALT}"
+      AGENTGATE_CREDENTIAL_SIGNING_KEY_FILE: "/run/secrets/cred_key.pem"
+      AGENTGATE_CREDENTIAL_AUDIENCES: "default=support-desk,mcp-probe=support-desk"
+      AGENTGATE_REQUIRE_DOWNSTREAM_CREDENTIAL: "true"
+      AGENTGATE_AUTHZ_TLS_CERT: "/run/secrets/agentgate.crt"
+      AGENTGATE_AUTHZ_TLS_KEY: "/run/secrets/agentgate.key"
+      AGENTGATE_AUTHZ_TLS_CLIENT_CA: "/run/secrets/ca.crt"
+      AGENTGATE_HTTP_TLS_CERT: "/run/secrets/agentgate.crt"
+      AGENTGATE_HTTP_TLS_KEY: "/run/secrets/agentgate.key"
+      AGENTGATE_OIDC_ISSUER_URL: "https://keycloak:8443/realms/agentgate"
+      AGENTGATE_OIDC_AUDIENCE: "agentgate-admin-api"
+      AGENTGATE_OIDC_ADMIN_ROLE: "agentgate-admin"
+      AGENTGATE_TOOL_BOOTSTRAP_FILE: "/etc/agentgate/tools.bootstrap.json"
+      SSL_CERT_FILE: "/run/secrets/ca.crt"
+    volumes:
+      - ../shared/tools.bootstrap.json:/etc/agentgate/tools.bootstrap.json:ro
+    secrets:
+      - agentgate.crt
+      - agentgate.key
+      - ca.crt
+      - cred_key.pem
+      - audit_salt
+      - app_password
+    ports:
+      - "9443:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/agentgate", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    networks:
+      - agentgate-prod
+
+  support-desk-mcp:
+    image: agentgate/support-desk-mcp:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.support-desk-mcp
+    container_name: prod-support-desk-mcp
+    restart: unless-stopped
+    environment:
+      DEMO_MCP_PORT: "9200"
+      DEMO_MCP_JWKS_URL: "https://agentgate:8090/.well-known/jwks.json"
+      DEMO_MCP_REQUIRE_CREDENTIAL: "true"
+      SSL_CERT_FILE: "/run/secrets/ca.crt"
+    secrets:
+      - ca.crt
+    depends_on:
+      agentgate:
+        condition: service_healthy
+    networks:
+      - agentgate-prod
+
+  agentgateway:
+    image: cr.agentgateway.dev/agentgateway:v1.4.0@sha256:771afaf093065477fa296eb90dcb618a0300165f12a32f80bbdd1427fab900ec
+    container_name: prod-agentgateway
+    restart: unless-stopped
+    command: ["-f", "/etc/agentgateway/config.yaml"]
+    volumes:
+      - ./agentgateway.yaml:/etc/agentgateway/config.yaml:ro
+      - ./secrets/ca.crt:/etc/agentgateway/certs/ca.crt:ro
+      - ./secrets/client.crt:/etc/agentgateway/certs/client.crt:ro
+      - ./secrets/client.key:/etc/agentgateway/certs/client.key:ro
+      - ./secrets/agentgateway.crt:/etc/agentgateway/certs/agentgateway.crt:ro
+      - ./secrets/agentgateway.key:/etc/agentgateway/certs/agentgateway.key:ro
+      - ./secrets/keycloak-jwks.json:/etc/agentgateway/jwks/keycloak-jwks.json:ro
+    ports:
+      - "3443:3000"
+    depends_on:
+      agentgate:
+        condition: service_healthy
+      support-desk-mcp:
+        condition: service_started
+    networks:
+      - agentgate-prod
+
+  admin-ui:
+    image: agentgate/admin-ui:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.admin-ui
+    container_name: prod-admin-ui
+    restart: unless-stopped
+    environment:
+      AGENTGATE_UI_API_URL: "${AGENTGATE_UI_API_URL:-}"
+      AGENTGATE_UI_OIDC_AUTHORITY: "${AGENTGATE_UI_OIDC_AUTHORITY:-https://localhost:8443/realms/agentgate}"
+      AGENTGATE_UI_OIDC_CLIENT_ID: "${AGENTGATE_UI_OIDC_CLIENT_ID:-agentgate-admin-ui}"
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./secrets/admin-ui.crt:/etc/nginx/certs/admin-ui.crt:ro
+      - ./secrets/admin-ui.key:/etc/nginx/certs/admin-ui.key:ro
+    ports:
+      - "8444:8443"
+    depends_on:
+      agentgate:
+        condition: service_healthy
+    networks:
+      - agentgate-prod
+
+  demo-agent:
+    image: agentgate/demo-agent:prod
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.demo-agent
+    container_name: prod-demo-agent
+    profiles: ["demo"]
+    restart: unless-stopped
+    command:
+      - "-gateway-url=https://agentgateway:3000"
+      - "-token-url=https://keycloak:8443/realms/agentgate/protocol/openid-connect/token"
+      - "-ca-file=/run/secrets/ca.crt"
+      - "-clients=agent-reader:/run/secrets/agent_reader_secret,agent-admin:/run/secrets/agent_admin_secret"
+      - "-rate=1.0"
+      - "-duration=0s"
+    environment:
+      DEMO_AGENT_GATEWAY_URL: "https://agentgateway:3000"
+      DEMO_AGENT_TOKEN_URL: "https://keycloak:8443/realms/agentgate/protocol/openid-connect/token"
+      DEMO_AGENT_CA_FILE: "/run/secrets/ca.crt"
+      DEMO_AGENT_CLIENTS: "agent-reader:/run/secrets/agent_reader_secret,agent-admin:/run/secrets/agent_admin_secret"
+      DEMO_AGENT_RATE: "1.0"
+      DEMO_AGENT_DURATION: "0s"
+    secrets:
+      - ca.crt
+      - agent_reader_secret
+      - agent_admin_secret
+    depends_on:
+      agentgateway:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    networks:
+      - agentgate-prod
+
+networks:
+  agentgate-prod:
+    name: agentgate-prod
+    driver: bridge
+
+volumes:
+  pgdata:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  migrator_password:
+    file: ./secrets/migrator_password
+  app_password:
+    file: ./secrets/app_password
+  keycloak_db_password:
+    file: ./secrets/keycloak_db_password
+  kc_admin_password:
+    file: ./secrets/kc_admin_password
+  admin_initial_password:
+    file: ./secrets/admin_initial_password
+  audit_salt:
+    file: ./secrets/audit_salt
+  cred_key.pem:
+    file: ./secrets/cred_key.pem
+  ca.crt:
+    file: ./secrets/ca.crt
+  agentgate.crt:
+    file: ./secrets/agentgate.crt
+  agentgate.key:
+    file: ./secrets/agentgate.key
+  keycloak.crt:
+    file: ./secrets/keycloak.crt
+  keycloak.key:
+    file: ./secrets/keycloak.key
+  agent_reader_secret:
+    file: ./secrets/agent_reader_secret
+  agent_admin_secret:
+    file: ./secrets/agent_admin_secret

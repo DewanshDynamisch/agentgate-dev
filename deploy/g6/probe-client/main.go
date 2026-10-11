@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -181,6 +182,7 @@ func main() {
 	argsFlag := flag.String("args", "{}", "Tool arguments JSON")
 	rawFlag := flag.String("raw", "", "Raw JSON payload to send directly")
 	skipInitFlag := flag.Bool("skip-init", false, "Skip initialize handshake")
+	printTokenFlag := flag.Bool("print-token", false, "Print the inbound bearer token to stderr (test evidence only)")
 	flag.Parse()
 
 	token := *tokenFlag
@@ -190,6 +192,10 @@ func main() {
 	// accepted, unless the caller supplied a real token explicitly.
 	if token == "" && *agentIDFlag != "" {
 		token = mintJWT(*agentIDFlag, *rolesFlag, *oboFlag)
+	}
+
+	if *printTokenFlag {
+		fmt.Fprintln(os.Stderr, "INBOUND_TOKEN="+token)
 	}
 
 	client := NewClient(*urlFlag, token)

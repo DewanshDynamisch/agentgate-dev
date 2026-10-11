@@ -2,18 +2,13 @@
 // downstream credential for the real MCP backend, resolving O-001
 // (docs/DECISIONS/OPEN_DECISIONS.md).
 //
-// # Status: interface only, no concrete Issuer yet
+// # Status: concrete issuer available
 //
-// This is G7 Task B's "design half"
-// (docs/PHASES/G7_WORKSTREAMS/01_BACKEND_G7.md §3). The *implementation*
-// half — a concrete Issuer for a real backend — is explicitly blocked on
-// AI/Gateway's Task B choosing which real/realistic backend to target and
-// documenting what credential model it needs
-// (deploy/demo/CREDENTIAL_REQUIREMENTS.md, not yet written). Building a
-// concrete mechanism against a guessed backend risks having to redo it once
-// the real requirements are known — so this package defines only the shape
-// AgentGate's own side of that exchange needs, not how any particular
-// backend's credential protocol works.
+// [JWTIssuer] is the concrete Issuer: it mints a per-call, short-lived RS256
+// JWT scoped to the backend audience, tool and ExecutionID, with the
+// on-behalf-of identity carried in the "act" claim. Its public key is
+// published via [JWTIssuer.JWKS]. Other backend-specific issuers may still
+// implement [Issuer].
 //
 // # Trust boundary
 //
@@ -69,9 +64,8 @@ type Credential struct {
 }
 
 // Issuer mints a downstream [Credential] for a call Cedar has already
-// allowed. Concrete implementations are backend-specific (API-key
-// injection, OAuth token exchange, a short-lived scoped PAT, ...); this
-// package intentionally does not provide one — see the package doc.
+// allowed. Implementations may be backend-specific (API-key injection, OAuth
+// token exchange, a short-lived scoped JWT, ...); see [JWTIssuer].
 type Issuer interface {
 	// Issue is called only for a decision.Request that has already produced
 	// res.Decision == decision.Allow. A non-nil error means the caller MUST

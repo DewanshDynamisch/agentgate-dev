@@ -31,11 +31,11 @@ than whoever built it (`AGENTGATE_V1_3_TEAM_PARALLEL_EXECUTION_PLAN.md` §9).
 | G5 | Durable Audit Boundary | ✅ COMPLETE | 2026-09-14 | 5 (old model) | No ALLOW without a durable, tamper-evident audit record |
 | G6 | Real MCP End-to-End Enforcement | ✅ COMPLETE | 2026-09-16 (evidence closed 2026-09-21) | 5 (old model) | Real MCP traffic through a real gateway is really enforced |
 | — | Restructure: 3-team model + admin-ui intake, then consolidation | ✅ COMPLETE | 2026-09-18 | — | Teams can work independently; one UI (frontend/app/) is in the repo, honestly documented |
-| **G7** | **Evidence, Downstream Identity & Read Surface** | 🔵 **ACTIVE** | opened 2026-09-18 | **All 3** | The enforcement claim is reproducible; downstream calls are properly credentialed |
-| G8 | Operator Visibility Complete | ⬜ PLANNED | — | All 3 | An operator sees *real* system state in the UI, not mock data |
-| G9 | Integration Breadth | ⬜ PLANNED | — | All 3 | AgentGate isn't hardcoded to one backend/one scenario |
-| G10 | Production Environment Readiness | ⬜ PLANNED | — | All 3 | It deploys, observes, recovers — from a clean environment |
-| G11 | Release Candidate Security Gate | ⬜ PLANNED | — | All 3 | Nothing critical/high is open; it's shippable |
+| G7 | Evidence, Downstream Identity & Read Surface | ✅ COMPLETE | 2026-10-08 | All 3 | The enforcement claim is reproducible; downstream calls are properly credentialed |
+| G8 | Operator Visibility Complete | ✅ COMPLETE | 2026-10-08 | All 3 | An operator sees *real* system state in the UI, not mock data |
+| G9 | Integration Breadth | ✅ COMPLETE | 2026-10-09 | All 3 | AgentGate isn't hardcoded to one backend/one scenario |
+| G10 | Production Environment Readiness | ✅ COMPLETE | 2026-10-09 | All 3 | It deploys, observes, recovers — from a clean environment |
+| G11 | Release Candidate Security Gate | ✅ COMPLETE | 2026-10-09 | All 3 | Nothing critical/high is open; it's shippable |
 | — | Public launch backlog | 🗄️ UNSCHEDULED | — | Frontend + Lead | Docs site, landing page, license, repo move |
 
 ✅ **G6 evidence gap, closed 2026-09-21:** the implementation was always real and sound; its

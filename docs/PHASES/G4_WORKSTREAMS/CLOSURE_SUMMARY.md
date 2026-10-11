@@ -226,5 +226,5 @@ With Gate G4 completed, formally approved by the Lead Architect, and frozen acro
 Next checkpoint is **Gate G5 — Durable Audit Boundary**, implementing:
 - High-throughput durable audit ingestion pipeline (O-002 concrete implementation).
 - Durable append-only persistence for authorization decisions and policy mutation events.
-- Audit event schema, tamper-detection (hash chaining/HMAC), and correlation across execution IDs.
+- Audit event schema, tamper-detection (hash chaining), and correlation across execution IDs.
 - Fail-closed or durable-before-response enforcement guarantees.

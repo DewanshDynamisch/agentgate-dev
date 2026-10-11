@@ -18,6 +18,12 @@ const (
 
 	// ActionCreateCandidate indicates a new candidate was created.
 	ActionCreateCandidate MutationAction = "create_candidate"
+
+	// ActionToolUpserted indicates a tool catalog definition was created or replaced.
+	ActionToolUpserted MutationAction = "tool_upserted"
+
+	// ActionToolDeleted indicates a tool catalog definition was removed.
+	ActionToolDeleted MutationAction = "tool_deleted"
 )
 
 // MutationEvent represents a single policy lifecycle mutation for audit purposes.
@@ -30,6 +36,20 @@ type MutationEvent struct {
 	CorrelationID   string
 	Timestamp       time.Time
 	OperatorID      string
+}
+
+type actorCtxKey struct{}
+
+// WithActor returns a context carrying the authenticated actor identity for
+// mutation attribution.
+func WithActor(ctx context.Context, actor string) context.Context {
+	return context.WithValue(ctx, actorCtxKey{}, actor)
+}
+
+// ActorFromContext returns the actor set by WithActor, or "" if none.
+func ActorFromContext(ctx context.Context) string {
+	a, _ := ctx.Value(actorCtxKey{}).(string)
+	return a
 }
 
 // MutationListener receives mutation events. G4 provides a no-op and a recording
