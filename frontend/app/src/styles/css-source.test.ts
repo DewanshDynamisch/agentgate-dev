@@ -19,6 +19,15 @@ describe('CSS source checks', () => {
     expect(combined).toMatch(/var\(--ag-accent\)/);
   });
 
+  it('alert variants use theme tokens, not hardcoded colours (dark-theme legibility)', () => {
+    const css = fs.readFileSync(path.join(stylesDir, 'components.css'), 'utf8');
+    for (const variant of ['error', 'warning', 'success']) {
+      const rule = css.match(new RegExp(`\\.ag-alert-${variant}\\s*\\{([^}]*)\\}`));
+      expect(rule, `.ag-alert-${variant} rule exists`).not.toBeNull();
+      expect(rule![1], `.ag-alert-${variant} must not hardcode hex colours`).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
   it('tokens.css does NOT contain a fonts.googleapis.com reference', () => {
     const tokensCss = fs.readFileSync(path.join(stylesDir, 'tokens.css'), 'utf8');
     expect(tokensCss).not.toMatch(/fonts\.googleapis\.com/);
