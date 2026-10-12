@@ -87,7 +87,7 @@ let failedAt = -1;
 const tmpDir = path.join(REPO_ROOT, '.ag-verify-tmp');
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-let scriptContent = '#!/bin/bash\nset -e\nexport GIT_TERMINAL_PROMPT=0\nexport GCM_INTERACTIVE=false\nexport GIT_ASKPASS=echo\nexport GCM_PROVIDER=empty\ngo() { go.exe "$@"; }\nexport -f go\nAG_VERIFY_DIR="$(pwd)/.ag-verify-tmp"\n';
+let scriptContent = '#!/bin/bash\nset -e\nexport GIT_TERMINAL_PROMPT=0\nexport GCM_INTERACTIVE=false\nexport GIT_ASKPASS=echo\nexport GCM_PROVIDER=empty\n# Only shim go -> go.exe where no native go exists (e.g. WSL calling Windows Go); Linux CI has no go.exe.\nif ! command -v go >/dev/null 2>&1 && command -v go.exe >/dev/null 2>&1; then go() { go.exe "$@"; }; export -f go; fi\nAG_VERIFY_DIR="$(pwd)/.ag-verify-tmp"\n';
 
 for (const block of blocks) {
   const cmd = block.command.replace(/\r/g, '');

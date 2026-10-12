@@ -152,6 +152,19 @@ echo "block two"
     assert.match(r.output, /PASS/i);
   });
 
+  await t.test('does not shadow a native `go` binary with a go.exe wrapper (Linux CI has no go.exe)', () => {
+    const md = `
+\`\`\`bash verify
+type -t go
+\`\`\`
+\`\`\`text expect
+file
+\`\`\`
+`;
+    const r = runVerifier(md);
+    assert.strictEqual(r.code, 0, `go should resolve to the real binary, not a wrapper function\n${r.output}`);
+  });
+
   await t.test('--file flag is required; missing flag causes error', () => {
     const result = spawnSync(process.execPath, [verifierScript], {
       encoding: 'utf8',
