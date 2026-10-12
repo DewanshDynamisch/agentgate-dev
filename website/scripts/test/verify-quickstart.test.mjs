@@ -60,6 +60,21 @@ exit 42
     assert.match(r.output, /FAIL/i);
   });
 
+  await t.test('failing command → includes trailing diagnostic output', () => {
+    const md = `
+\`\`\`bash verify
+echo "diagnostic-start-marker"
+for i in $(seq 1 500); do echo "filler-output-line-$i"; done
+echo "diagnostic-tail-marker"
+exit 1
+\`\`\`
+`;
+    const r = runVerifier(md);
+    assert.notStrictEqual(r.code, 0, 'should fail when a command exits non-zero');
+    assert.match(r.output, /diagnostic-tail-marker/);
+    assert.doesNotMatch(r.output, /filler-output-line-1\b/);
+  });
+
   await t.test('passing command → exits zero and shows PASS', () => {
     const md = `
 \`\`\`bash verify
@@ -150,6 +165,19 @@ echo "block two"
     // Table should show block numbers
     assert.match(r.output, /block\s*[#:]?\s*[01]|#0|#1|\[0\]|\[1\]/i);
     assert.match(r.output, /PASS/i);
+  });
+
+  await t.test('does not shadow a native `go` binary with a go.exe wrapper (Linux CI has no go.exe)', () => {
+    const md = `
+\`\`\`bash verify
+type -t go
+\`\`\`
+\`\`\`text expect
+file
+\`\`\`
+`;
+    const r = runVerifier(md);
+    assert.strictEqual(r.code, 0, `go should resolve to the real binary, not a wrapper function\n${r.output}`);
   });
 
   await t.test('--file flag is required; missing flag causes error', () => {

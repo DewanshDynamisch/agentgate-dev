@@ -80,7 +80,7 @@ ALLOW|policy_allow
 Clean up the demonstration environment. Verified by deploy/demo/README.md.
 
 ```bash verify
-docker compose down -v
+cd "$(git rev-parse --show-toplevel)" && docker compose -f deploy/demo/docker-compose.yml down -v
 ```
 
 :::info What you just saw

@@ -129,7 +129,9 @@ Optional, matching CI more closely:
 go test -race ./...
 
 # Linter (install golangci-lint first if you don't have it)
+# CI uses golangci-lint v2.14.0, which supports the module's Go 1.26.9.
 golangci-lint run --timeout=5m
+# CI gates only new findings in each PR/push diff; a full local run may also show existing lint debt.
 
 # Known-vulnerability scan (downloads on first run, needs network)
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...

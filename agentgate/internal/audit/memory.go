@@ -100,17 +100,17 @@ func (m *MemoryStore) AppendDecision(_ context.Context, record DecisionRecord) (
 // AppendMutation persists a policy mutation event into memory.
 func (m *MemoryStore) AppendMutation(ctx context.Context, event auditevents.MutationEvent, prevHash string) (*StoredRecord, error) {
 	rec := DecisionRecord{
-		WorkspaceID:         event.WorkspaceID,
-		ExecutionID:         event.CorrelationID,
-		Timestamp:           event.Timestamp,
-		EventType:           EventTypeMutation,
-		Decision:            "MUTATION",
-		Reason:              string(event.Action),
-		PrincipalAgentID:    event.OperatorID,
-		PolicyVersion:       event.NewVersion,
-		PolicyHash:          event.PreviousVersion,
-		PrevHash:            prevHash,
-		RedactedArguments:   make(map[string]string),
+		WorkspaceID:       event.WorkspaceID,
+		ExecutionID:       event.CorrelationID,
+		Timestamp:         event.Timestamp,
+		EventType:         EventTypeMutation,
+		Decision:          "MUTATION",
+		Reason:            string(event.Action),
+		PrincipalAgentID:  event.OperatorID,
+		PolicyVersion:     event.NewVersion,
+		PolicyHash:        event.PreviousVersion,
+		PrevHash:          prevHash,
+		RedactedArguments: make(map[string]string),
 	}
 
 	return m.AppendDecision(ctx, rec)

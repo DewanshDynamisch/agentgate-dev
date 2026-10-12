@@ -763,22 +763,24 @@
   margin-bottom: 16px;
 }
 
+/* Status tokens (not hex) so alerts stay legible in both themes; the text/soft
+   pairs are contrast-checked in src/lib/contrast.test.ts. */
 .ag-alert-error {
   background: var(--ag-deny-soft);
-  color: #991b1b;
-  border: 1px solid #fecaca;
+  color: var(--ag-deny);
+  border: 1px solid color-mix(in srgb, var(--ag-deny) 35%, transparent);
 }
 
 .ag-alert-warning {
   background: var(--ag-candidate-soft);
-  color: #854d0e;
-  border: 1px solid #fef08a;
+  color: var(--ag-candidate);
+  border: 1px solid color-mix(in srgb, var(--ag-candidate) 35%, transparent);
 }
 
 .ag-alert-success {
   background: var(--ag-allow-soft);
-  color: #166534;
-  border: 1px solid #bbf7d0;
+  color: var(--ag-allow);
+  border: 1px solid color-mix(in srgb, var(--ag-allow) 35%, transparent);
 }
 
 /* ---------- Stat / metric ---------- */

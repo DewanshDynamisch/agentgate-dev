@@ -44,19 +44,19 @@ type BackendState struct {
 }
 
 type AuditEventView struct {
-	ID                  int64     `json:"id"`
-	WorkspaceID         string    `json:"workspace_id"`
-	SequenceNumber      int64     `json:"sequence_number"`
-	ExecutionID         string    `json:"execution_id"`
-	Timestamp           time.Time `json:"timestamp"`
-	EventType           string    `json:"event_type"`
-	Decision            string    `json:"decision"`
-	Reason              string    `json:"reason"`
-	PrincipalAgentID    string    `json:"principal_agent_id"`
-	PrincipalRoles      []string  `json:"principal_roles"`
-	PrincipalOnBehalfOf string    `json:"principal_on_behalf_of"`
-	ToolBackendID       string    `json:"tool_backend_id"`
-	ToolName            string    `json:"tool_name"`
+	ID                  int64             `json:"id"`
+	WorkspaceID         string            `json:"workspace_id"`
+	SequenceNumber      int64             `json:"sequence_number"`
+	ExecutionID         string            `json:"execution_id"`
+	Timestamp           time.Time         `json:"timestamp"`
+	EventType           string            `json:"event_type"`
+	Decision            string            `json:"decision"`
+	Reason              string            `json:"reason"`
+	PrincipalAgentID    string            `json:"principal_agent_id"`
+	PrincipalRoles      []string          `json:"principal_roles"`
+	PrincipalOnBehalfOf string            `json:"principal_on_behalf_of"`
+	ToolBackendID       string            `json:"tool_backend_id"`
+	ToolName            string            `json:"tool_name"`
 	ToolRisk            string            `json:"tool_risk"`
 	PolicyVersion       string            `json:"policy_version"`
 	PolicyHash          string            `json:"policy_hash"`

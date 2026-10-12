@@ -23,27 +23,27 @@ func (l *recordingListener) OnMutation(ctx context.Context, event auditevents.Mu
 
 func TestBootstrapDefaultPolicy(t *testing.T) {
 	tests := []struct {
-		name         string
-		setupStore   func(t *testing.T) policystore.Store
-		wantErr      bool
-		wantVersion  string
-		wantEvents   int
+		name        string
+		setupStore  func(t *testing.T) policystore.Store
+		wantErr     bool
+		wantVersion string
+		wantEvents  int
 	}{
 		{
 			name: "fresh store => baseline seeded and active",
 			setupStore: func(t *testing.T) policystore.Store {
 				return policystore.NewMemoryStore()
 			},
-			wantErr: false,
+			wantErr:     false,
 			wantVersion: "v1.0.0",
-			wantEvents: 2, // create and activate
+			wantEvents:  2, // create and activate
 		},
 		{
 			name: "store where manager A created and activated a non-baseline policy v2",
 			setupStore: func(t *testing.T) policystore.Store {
 				store := policystore.NewMemoryStore()
 				m := policymanager.New(store)
-				_, err := m.CreateCandidateWithVersion(context.Background(), "default", "v2", fixturepolicy.CedarSource + "\n// modified", "v2")
+				_, err := m.CreateCandidateWithVersion(context.Background(), "default", "v2", fixturepolicy.CedarSource+"\n// modified", "v2")
 				if err != nil {
 					t.Fatalf("setup create: %v", err)
 				}
@@ -52,9 +52,9 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 				}
 				return store
 			},
-			wantErr: false,
+			wantErr:     false,
 			wantVersion: "v2",
-			wantEvents: 0,
+			wantEvents:  0,
 		},
 		{
 			name: "store with baseline active => bootstrap twice => no new events on second call",
@@ -70,9 +70,9 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 				}
 				return store
 			},
-			wantErr: false,
+			wantErr:     false,
 			wantVersion: "v1.0.0",
-			wantEvents: 0,
+			wantEvents:  0,
 		},
 		{
 			name: "active policy whose stored content is corrupt/unparseable",
@@ -80,9 +80,9 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 				store := policystore.NewMemoryStore()
 				return &corruptStore{Store: store}
 			},
-			wantErr: true,
+			wantErr:     true,
 			wantVersion: "",
-			wantEvents: 0,
+			wantEvents:  0,
 		},
 		{
 			name: "store with v1.0.0 present but no active policy",
@@ -95,9 +95,9 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 				}
 				return store
 			},
-			wantErr: false,
+			wantErr:     false,
 			wantVersion: "v1.0.0",
-			wantEvents: 1, // only activate, not create
+			wantEvents:  1, // only activate, not create
 		},
 		{
 			name: "postgres: store where manager A created and activated a non-baseline policy v2",
@@ -126,34 +126,34 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 				}
 				return store
 			},
-			wantErr: false,
+			wantErr:     false,
 			wantVersion: "v2",
-			wantEvents: 0,
+			wantEvents:  0,
 		},
 		{
 			name: "GetActivePolicy error propagates",
 			setupStore: func(t *testing.T) policystore.Store {
 				return &errorStore{Store: policystore.NewMemoryStore()}
 			},
-			wantErr: true,
+			wantErr:     true,
 			wantVersion: "",
-			wantEvents: 0,
+			wantEvents:  0,
 		},
 		{
 			name: "Activate error propagates",
 			setupStore: func(t *testing.T) policystore.Store {
 				return &activateErrorStore{Store: policystore.NewMemoryStore()}
 			},
-			wantErr: true,
+			wantErr:     true,
 			wantVersion: "",
-			wantEvents: 1, // CreateCandidate succeeds, Activate fails
+			wantEvents:  1, // CreateCandidate succeeds, Activate fails
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := tt.setupStore(t)
-			
+
 			listener := &recordingListener{}
 			m := policymanager.NewWithListener(store, listener)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -183,6 +183,7 @@ func TestBootstrapDefaultPolicy(t *testing.T) {
 type corruptStore struct {
 	policystore.Store
 }
+
 func (c *corruptStore) GetActivePolicy(ctx context.Context, workspaceID string) (policystore.PolicyRecord, error) {
 	return policystore.PolicyRecord{
 		WorkspaceID: workspaceID,
@@ -195,6 +196,7 @@ func (c *corruptStore) GetActivePolicy(ctx context.Context, workspaceID string) 
 type errorStore struct {
 	policystore.Store
 }
+
 func (e *errorStore) GetActivePolicy(ctx context.Context, workspaceID string) (policystore.PolicyRecord, error) {
 	return policystore.PolicyRecord{}, os.ErrPermission // Some generic error
 }
@@ -202,6 +204,7 @@ func (e *errorStore) GetActivePolicy(ctx context.Context, workspaceID string) (p
 type activateErrorStore struct {
 	policystore.Store
 }
+
 func (e *activateErrorStore) GetActivePolicy(ctx context.Context, workspaceID string) (policystore.PolicyRecord, error) {
 	return policystore.PolicyRecord{}, policystore.ErrNoActivePolicy
 }

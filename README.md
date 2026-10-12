@@ -1,6 +1,6 @@
 # AgentGate
 
-![Go Version](https://img.shields.io/badge/go-1.25.0-blue)
+![Go Version](https://img.shields.io/badge/go-1.26.9-blue)
 [![CI](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml)
 ![Licence](https://img.shields.io/badge/licence-TBD-lightgrey)
 
@@ -25,6 +25,11 @@ Want to see it in action? See the [Quickstart Guide](website/docs/quickstart.md)
 ```
 
 ## Documentation
+One documentation site in [`website/`](website/) holds both the user/integrator docs and the
+[Architecture & Contributor Guide](website/docs/developer/getting-started/overview.md).
+Run it locally with `cd website && npm ci && npm start` (http://localhost:3000), or
+`npm run build && npm run serve` for the static build.
+
 - [Known Limitations](docs/OPERATIONS/RUNBOOK.md#known-v1-limitations)
 - [Contributor Documentation](docs/DEVELOPMENT/)
 

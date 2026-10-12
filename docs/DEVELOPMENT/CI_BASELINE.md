@@ -41,9 +41,10 @@ as its first step and gates every subsequent Go-specific step on that detection:
 - If `go.mod` is absent, the job logs a notice explaining why the Go steps are skipped and
   otherwise finishes successfully — a false CI failure serves nobody, but the workflow does not
   pretend to have validated something that does not exist.
-- If `go.mod` is present, every Go-specific step runs unconditionally and must pass. There is no
-  code path where the presence of a Go module lets a failing check be silently skipped — a broken
-  `go vet`, failing test, lint violation, or vulnerability finding fails the job.
+- If `go.mod` is present, every Go-specific step runs unconditionally. A broken `go vet`, failing
+  test, newly introduced lint issue, or vulnerability finding fails the job. The lint action uses
+  `only-new-issues` so pre-existing lint debt does not block unrelated changes; issues in changed
+  lines are still gated.
 
 This is the intended and only conditional logic in the workflow. No other part of the pipeline
 branches on repository state.
@@ -58,9 +59,11 @@ Once `go.mod` exists, the single `go` job in `.github/workflows/ci.yml` runs, in
 3. **`go test -race ./...`** — the full test suite, race-detector enabled. Per
    `docs/TECH_STACK.md §1`, agentgate is a concurrent, latency-sensitive decision service; the race
    detector is treated as a default requirement, not an opt-in extra.
-4. **`golangci-lint`** (`golangci/golangci-lint-action@v6`, default rule set — no project-specific
-   `.golangci.yml` exists yet, so the action's own defaults apply until Phase 1 defines one) — the
-   linter named in `docs/TECH_STACK.md §2.9` / §1.
+4. **`golangci-lint` v2.14.0** (`golangci/golangci-lint-action@v8` — golangci-lint v2 requires action v7+; default rule set — no
+   project-specific `.golangci.yml` exists yet, so the action's own defaults apply) — the linter
+   named in `docs/TECH_STACK.md §2.9` / §1. The version is pinned so the linter can analyze the
+   module's declared Go version (`go 1.26.9` in `agentgate/go.mod`). `only-new-issues: true` gates newly introduced findings in
+   each PR or push diff while allowing the existing lint backlog to be addressed incrementally.
 5. **`govulncheck`** (`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`) — known-vulnerability
    scanning against the module's actual dependency graph, also named in `docs/TECH_STACK.md §2.9`.
 
@@ -68,8 +71,9 @@ All five checks were selected directly from `docs/TECH_STACK.md`; nothing was ad
 stack document does not already call for.
 
 Triggers: every push to `main`/`master` and every pull request. A `concurrency` group cancels
-superseded runs on the same ref to avoid queueing stale jobs. `permissions: contents: read` is set
-at the workflow level (least privilege — nothing in this workflow needs write access).
+superseded runs on the same ref to avoid queueing stale jobs. Workflow permissions are limited to
+`contents: read` and `pull-requests: read`; the latter lets the lint action fetch PR diffs for
+new-issue filtering. No write access is granted.
 
 ## Intentionally Deferred
 
@@ -114,11 +118,8 @@ automatically. Expected follow-on work, to be scoped as its own task(s) rather t
   so the Go version CI uses always matches whatever the module declares (currently planned as
   "Go 1.26+" per `docs/TECH_STACK.md §1`) — this avoids hardcoding a Go version in the workflow
   that could drift from the module's own declaration.
-- `golangci-lint` and `govulncheck` have no version pinned in `docs/TECH_STACK.md`, so this
-  workflow does not invent one: it uses the lint action's own default tool version and runs
-  `govulncheck` via `go run ...@latest` against the real dependency graph, rather than pinning a
-  release tag that has not been through the same review as the versions the tech stack document
-  does specify.
+- `golangci-lint` and `govulncheck` have no version pinned in `docs/TECH_STACK.md`. The linter is
+  pinned to v2.14.0 so it can analyze the module's declared Go version (`go 1.26.9`); `govulncheck` runs via `go run ...@latest` against the real dependency graph.
 - No repository secrets, external services, or network-dependent test infrastructure are required
   by this workflow — it needs nothing beyond the checked-out repository and the standard GitHub
   Actions toolchain setup actions.

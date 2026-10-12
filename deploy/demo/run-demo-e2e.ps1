@@ -125,7 +125,8 @@ function Invoke-Main {
     Write-Host "Stack healthy; JWKS published." -ForegroundColor Green
 
     # 3. Reset state
-    docker compose -f $composeFile exec -T support-desk-mcp wget -qO- --post-data= http://localhost:9200/_demo/reset | Out-Null
+    # support-desk-mcp is distroless (no wget); call it from the agentgate container, as Get-DemoState does.
+    docker compose -f $composeFile exec -T agentgate wget -qO- --post-data= http://support-desk-mcp:9200/_demo/reset | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "state reset failed" -ForegroundColor Red; $script:exitCode = 1; return }
 
     # 4. Allowed call as reader (retry: gateway may need a moment)

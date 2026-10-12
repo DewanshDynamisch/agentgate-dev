@@ -66,8 +66,10 @@ export function LoginPage() {
 
         {!ssoConfigured ? (
           <div className="ag-alert ag-alert-error">
-            <strong>SSO not configured.</strong> Set <code>oidcAuthority</code> and <code>oidcClientId</code> in{" "}
-            <code>/config.js</code>.
+            <div>
+              <strong>SSO not configured.</strong> Set <code>oidcAuthority</code> and <code>oidcClientId</code> in{" "}
+              <code>/config.js</code>.
+            </div>
           </div>
         ) : (
           <>

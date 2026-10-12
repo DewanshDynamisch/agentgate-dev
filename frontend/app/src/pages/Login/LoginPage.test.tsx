@@ -3,12 +3,13 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { LoginPage } from './LoginPage';
 
-// Mock useAuth
+// Mock useAuth; individual tests may flip ssoConfigured.
+const authState = vi.hoisted(() => ({ ssoConfigured: true }));
 vi.mock('../../state/AuthProvider', () => ({
   useAuth: () => ({
     user: null,
     loading: false,
-    ssoConfigured: true,
+    ssoConfigured: authState.ssoConfigured,
     login: vi.fn().mockResolvedValue(undefined),
   }),
 }));
@@ -16,6 +17,7 @@ vi.mock('../../state/AuthProvider', () => ({
 describe('LoginPage', () => {
   afterEach(() => {
     cleanup();
+    authState.ssoConfigured = true;
   });
 
   beforeEach(() => {
@@ -52,17 +54,30 @@ describe('LoginPage', () => {
   });
 
   it('renders SSO not configured message when ssoConfigured is false', () => {
-    vi.doMock('../../state/AuthProvider', () => ({
-      useAuth: () => ({
-        user: null,
-        loading: false,
-        ssoConfigured: false,
-        login: vi.fn(),
-      }),
-    }));
-    // Re-import after mock - the static mock above already covers the true case;
-    // just check the existing behaviour with the configured=true mock from above
-    // (The false case is already in the JSX branch: the button is absent).
-    expect(true).toBe(true); // placeholder; covered by integration
+    authState.ssoConfigured = false;
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText(/sso not configured/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign in with sso/i })).not.toBeInTheDocument();
+  });
+
+  it('wraps the SSO not configured message in a single flex child so it wraps inside the alert', () => {
+    authState.ssoConfigured = false;
+    const { container } = render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>
+    );
+    const alert = container.querySelector('.ag-alert');
+    expect(alert).not.toBeNull();
+    // .ag-alert is display:flex; loose text and inline elements would each become a flex item.
+    const nonEmptyTextNodes = Array.from(alert!.childNodes).filter(
+      (n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim() !== '',
+    );
+    expect(nonEmptyTextNodes).toHaveLength(0);
+    expect(alert!.children).toHaveLength(1);
   });
 });

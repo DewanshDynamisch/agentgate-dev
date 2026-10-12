@@ -47,7 +47,7 @@ type RollbackResponse struct {
 
 // ListPoliciesResponse returns the list of all policy versions for a workspace.
 type ListPoliciesResponse struct {
-	WorkspaceID string                    `json:"workspace_id"`
+	WorkspaceID string                     `json:"workspace_id"`
 	Policies    []policystore.PolicyRecord `json:"policies"`
 }
 
@@ -118,7 +118,7 @@ type DryRunCompareResult struct {
 // DryRunCompareResponse aggregates comparison results.
 type DryRunCompareResponse struct {
 	CandidateVersion string                `json:"candidate_version"`
-	Results          []DryRunCompareResult  `json:"results"`
+	Results          []DryRunCompareResult `json:"results"`
 }
 
 // AuditEventView is the operator-facing audit record shape — a read-only

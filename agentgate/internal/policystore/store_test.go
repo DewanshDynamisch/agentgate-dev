@@ -205,4 +205,3 @@ func TestPostgresStore(t *testing.T) {
 
 	testStoreBehavior(t, store)
 }
-

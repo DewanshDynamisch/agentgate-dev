@@ -1,5 +1,13 @@
 ﻿# AgentGate — Developer Docs Site
 
+> **Deprecated.** This content now lives in the unified documentation site at
+> [`website/docs/developer/`](../website/docs/developer/) and is served under the
+> **Architecture & Contributor Guide** navbar entry (`cd website && npm start`).
+> Edit the pages there, not here. This folder is kept until the merge is reviewed.
+> Note: `artefacts/scripts/generate-commit-index.mjs` still writes to
+> `developer-docs/docs/history/commit-index.md`; copy the regenerated file to
+> `website/docs/developer/history/` until the script is repointed.
+
 This folder is a [Docusaurus](https://docusaurus.io/) static site that is part of
 the `agentgate-dev` monorepo. It is the synthesized, source-checked developer
 knowledge base for the repository (the durable *canonical* project context

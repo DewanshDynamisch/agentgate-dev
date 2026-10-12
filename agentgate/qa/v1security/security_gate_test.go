@@ -220,7 +220,7 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 	if expStatus != http.StatusUnauthorized {
 		t.Fatalf("expected status 401 for expired credential after 71s, got %d: %s", expStatus, string(expBody))
 	}
-	
+
 	expBodyStr := string(expBody)
 	if !strings.Contains(expBodyStr, "expired") {
 		t.Fatalf("expected 401 body to indicate expired, got: %s", expBodyStr)
@@ -228,7 +228,7 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 	if strings.Contains(expBodyStr, "replayed") {
 		t.Fatalf("expected 401 body NOT to indicate replayed, got: %s", expBodyStr)
 	}
-	
+
 	t.Log("TestV1_05_CredentialExpiry: passed (received 401 as expected)")
 }
 
@@ -612,8 +612,9 @@ func TestV1_17_CatalogRace(t *testing.T) {
 
 	stopToggles := make(chan struct{})
 	var toggleWg sync.WaitGroup
+	toggleErrors := make(chan error, 40)
 
-	// Goroutine toggling risk 20 times
+	// Pace catalog writes below the configured admin API rate limit while requests run.
 	toggleWg.Add(1)
 	go func() {
 		defer toggleWg.Done()
@@ -624,9 +625,13 @@ func TestV1_17_CatalogRace(t *testing.T) {
 				return
 			default:
 				risk := risks[i%2]
-				_ = cfg.SetToolRisk(t, adminToken, "default", "update_ticket_status", risk)
-				_ = cfg.SetToolRisk(t, adminToken, "mcp-probe", "update_ticket_status", risk)
-				time.Sleep(15 * time.Millisecond)
+				if err := cfg.SetToolRisk(t, adminToken, "default", "update_ticket_status", risk); err != nil {
+					toggleErrors <- fmt.Errorf("set default backend risk to %q: %w", risk, err)
+				}
+				if err := cfg.SetToolRisk(t, adminToken, "mcp-probe", "update_ticket_status", risk); err != nil {
+					toggleErrors <- fmt.Errorf("set mcp-probe backend risk to %q: %w", risk, err)
+				}
+				time.Sleep(300 * time.Millisecond)
 			}
 		}
 	}()
@@ -642,16 +647,24 @@ func TestV1_17_CatalogRace(t *testing.T) {
 				"new_status": "in_progress",
 			}, nil)
 		}(i)
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	callWg.Wait()
 	close(stopToggles)
 	toggleWg.Wait()
+	close(toggleErrors)
+	for err := range toggleErrors {
+		t.Errorf("catalog risk toggle failed: %v", err)
+	}
 
 	// Restore write risk before verification
-	_ = cfg.SetToolRisk(t, adminToken, "default", "update_ticket_status", "write")
-	_ = cfg.SetToolRisk(t, adminToken, "mcp-probe", "update_ticket_status", "write")
+	if err := cfg.SetToolRisk(t, adminToken, "default", "update_ticket_status", "write"); err != nil {
+		t.Errorf("restore default backend risk: %v", err)
+	}
+	if err := cfg.SetToolRisk(t, adminToken, "mcp-probe", "update_ticket_status", "write"); err != nil {
+		t.Errorf("restore mcp-probe backend risk: %v", err)
+	}
 
 	events, err := cfg.GetAuditEvents(t, adminToken, "default")
 	if err != nil {

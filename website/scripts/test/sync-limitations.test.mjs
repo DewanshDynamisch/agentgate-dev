@@ -59,7 +59,26 @@ test('sync-limitations script', async (t) => {
         assert.match(outContent, /1\. \*\*First item\*\*: details/);
         assert.match(outContent, /2\. \*\*Second item\*\*: details/);
         assert.match(outContent, /3\. \*\*Third item\*\*: details/);
-        
+
+        rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    await t.test('handles CRLF line endings (Windows checkout with core.autocrlf)', () => {
+        const tmpDir = join(tmpdir(), `ag-sync-lim-test-${randomBytes(4).toString('hex')}`);
+        mkdirSync(tmpDir, { recursive: true });
+        const runbookPath = join(tmpDir, 'RUNBOOK.md');
+        const outPath = join(tmpDir, 'limitations.mdx');
+
+        writeFileSync(runbookPath, '## 12. Known v1 Limitations\r\n\r\n1. **First item**: details\r\n2. **Second item**: details\r\n\r\n## 13. Next\r\n\r\n1. **Not a limitation**\r\n');
+
+        execSync(`node "${SCRIPT_PATH}" "${runbookPath}" "${outPath}"`, { stdio: 'pipe' });
+
+        const outContent = readFileSync(outPath, 'utf8');
+        assert.match(outContent, /1\. \*\*First item\*\*: details/);
+        assert.match(outContent, /2\. \*\*Second item\*\*: details/);
+        assert.doesNotMatch(outContent, /Not a limitation/);
+        assert.doesNotMatch(outContent, /\r/);
+
         rmSync(tmpDir, { recursive: true, force: true });
     });
 });

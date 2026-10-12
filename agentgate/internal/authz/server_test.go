@@ -358,4 +358,3 @@ func TestCheck_SlowEvaluatorTimesOut(t *testing.T) {
 		t.Errorf("expected x-agentgate-reason == evaluation_error header in response")
 	}
 }
-
