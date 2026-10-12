@@ -75,7 +75,7 @@ jobs:
 
       - name: golangci-lint
         if: steps.gomod.outputs.exists == 'true'
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
           args: --timeout=5m

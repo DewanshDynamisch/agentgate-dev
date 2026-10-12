@@ -59,7 +59,7 @@ Once `go.mod` exists, the single `go` job in `.github/workflows/ci.yml` runs, in
 3. **`go test -race ./...`** — the full test suite, race-detector enabled. Per
    `docs/TECH_STACK.md §1`, agentgate is a concurrent, latency-sensitive decision service; the race
    detector is treated as a default requirement, not an opt-in extra.
-4. **`golangci-lint` v2.4.0** (`golangci/golangci-lint-action@v6`, default rule set — no
+4. **`golangci-lint` v2.4.0** (`golangci/golangci-lint-action@v8` — golangci-lint v2 requires action v7+; default rule set — no
    project-specific `.golangci.yml` exists yet, so the action's own defaults apply) — the linter
    named in `docs/TECH_STACK.md §2.9` / §1. The version is pinned because v2.4.0 added Go 1.25
    support, matching `agentgate/go.mod`. `only-new-issues: true` gates newly introduced findings in
