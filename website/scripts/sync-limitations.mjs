@@ -6,7 +6,8 @@ const runbookPath = args[0] || '../docs/OPERATIONS/RUNBOOK.md';
 const outPath = args[1] || 'docs/_generated/limitations.mdx';
 
 try {
-    const content = readFileSync(runbookPath, 'utf8');
+    // Normalize CRLF so a Windows checkout (core.autocrlf=true) parses the same as Linux CI.
+    const content = readFileSync(runbookPath, 'utf8').replace(/\r\n/g, '\n');
     const sectionMatch = content.match(/## \d+\. Known v1 Limitations\n([\s\S]*?)(\n## \d+\. |\n*$)/);
 
     if (!sectionMatch) {

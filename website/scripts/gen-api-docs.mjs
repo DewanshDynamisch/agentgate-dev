@@ -79,7 +79,7 @@ async function main() {
 
     const renderParams = (params) => {
         if (!params || params.length === 0) return '';
-        let md = '### Parameters\n\n| Name | In | Required | Type | Description |\n|---|---|---|---|---|\n';
+        let md = '#### Parameters\n\n| Name | In | Required | Type | Description |\n|---|---|---|---|---|\n';
         for (const p of params) {
             const schemaType = p.schema ? p.schema.type : '';
             md += `| \`${escapeMdx(p.name)}\` | ${p.in} | ${p.required ? 'Yes' : 'No'} | \`${schemaType}\` | ${escapeMdx(p.description || '')} |\n`;
@@ -89,7 +89,7 @@ async function main() {
 
     const renderRequestBody = (body) => {
         if (!body || !body.content) return '';
-        let md = '### Request Body\n\n';
+        let md = '#### Request Body\n\n';
         if (body.description) {
             md += `${escapeMdx(body.description)}\n\n`;
         }
@@ -114,7 +114,7 @@ async function main() {
 
     const renderResponses = (responses) => {
         if (!responses) return '';
-        let md = '### Responses\n\n| Status | Description |\n|---|---|\n';
+        let md = '#### Responses\n\n| Status | Description |\n|---|---|\n';
         for (const [status, info] of Object.entries(responses)) {
             md += `| \`${status}\` | ${escapeMdx(info.description || '')} |\n`;
         }
@@ -122,8 +122,8 @@ async function main() {
     };
 
     const renderAuth = (security) => {
-        if (!security || security.length === 0) return '### Auth Requirement\n\nNone\n\n';
-        let md = '### Auth Requirement\n\n';
+        if (!security || security.length === 0) return '#### Auth Requirement\n\nNone\n\n';
+        let md = '#### Auth Requirement\n\n';
         for (const sec of security) {
             md += `- \`${Object.keys(sec).join(', ')}\`\n`;
         }
@@ -132,10 +132,10 @@ async function main() {
 
     for (const [tag, ops] of groups.entries()) {
         const slug = tag.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        let content = `# ${tag} API {#${slug}-api}\n\n`;
+        let content = `## ${tag} API {#${slug}-api}\n\n`;
 
         for (const op of ops) {
-            content += `## ${escapeMdx(op.summary || op.path)}\n\n`;
+            content += `### ${escapeMdx(op.summary || op.path)}\n\n`;
             content += `**Method:** \`${op.method}\`  \n**Path:** \`${escapeMdx(op.path)}\`\n\n`;
             if (op.description) {
                 content += `${escapeMdx(op.description)}\n\n`;

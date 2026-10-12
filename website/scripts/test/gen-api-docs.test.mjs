@@ -86,4 +86,23 @@ paths: {}
             assert.ok(allOutput.includes(escapedPath), `Path ${pathStr} should appear in the generated pages`);
         }
     });
+
+    test('index links resolve to h2 anchors (Docusaurus only assigns ids to h2 and below)', async () => {
+        await fs.rm(outDir, { recursive: true, force: true });
+        await fs.mkdir(outDir, { recursive: true });
+        execSync(`node "${SCRIPT}" "${realSpec}" "${outDir}"`, { stdio: 'pipe' });
+
+        const index = await fs.readFile(path.join(outDir, 'index.mdx'), 'utf8');
+        const targets = [...index.matchAll(/\]\(#([a-z0-9-]+)\)/g)].map(m => m[1]);
+        assert.ok(targets.length > 0, 'index must link to at least one section');
+
+        let sections = '';
+        for (const file of await fs.readdir(outDir)) {
+            if (file !== 'index.mdx') sections += await fs.readFile(path.join(outDir, file), 'utf8');
+        }
+        for (const id of targets) {
+            assert.match(sections, new RegExp(`^## .* \\{#${id}\\}$`, 'm'), `#${id} must be declared on an h2 heading`);
+        }
+        assert.doesNotMatch(sections, /^# /m, 'section partials must not emit h1 headings');
+    });
 });
