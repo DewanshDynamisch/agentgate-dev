@@ -17,18 +17,17 @@ Open PowerShell and simulate an injected or hallucinated tool call named `dump_c
 
 ```powershell
 # 1. Obtain token for 'agent-reader'
-$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_client_secret).Trim()
+$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_secret).Trim()
 $tokenResp = curl.exe -k -s -X POST https://localhost:8443/realms/agentgate/protocol/openid-connect/token `
     -H "Content-Type: application/x-www-form-urlencoded" `
     -d "grant_type=client_credentials&client_id=agent-reader&client_secret=$agentSecret"
 $agentToken = ($tokenResp | ConvertFrom-Json).access_token
 
 # 2. Call an unregistered / hallucinated tool
-$payload = '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"dump_customer_database","arguments":{"format":"csv"}}}'
 curl.exe -k -s -i -X POST https://localhost:3443/ `
     -H "Authorization: Bearer $agentToken" `
     -H "Content-Type: application/json" `
-    -d $payload
+    -d '{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"dump_customer_database\",\"arguments\":{\"format\":\"csv\"}}}'
 ```
 
 ---

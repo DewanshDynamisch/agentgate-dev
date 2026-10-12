@@ -17,17 +17,16 @@
 In terminal, test calling `close_ticket` as `agent-reader`. By default, `close_ticket` is classified as `write` (which the reader agent is currently allowed or configured to run depending on baseline policy):
 
 ```powershell
-$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_client_secret).Trim()
+$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_secret).Trim()
 $tokenResp = curl.exe -k -s -X POST https://localhost:8443/realms/agentgate/protocol/openid-connect/token `
     -H "Content-Type: application/x-www-form-urlencoded" `
     -d "grant_type=client_credentials&client_id=agent-reader&client_secret=$agentSecret"
 $agentToken = ($tokenResp | ConvertFrom-Json).access_token
 
-$payload = '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"close_ticket","arguments":{"ticket_id":"TCK-1002","reason":"Resolved"}}}'
 curl.exe -k -s -i -X POST https://localhost:3443/ `
     -H "Authorization: Bearer $agentToken" `
     -H "Content-Type: application/json" `
-    -d $payload
+    -d '{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"close_ticket\",\"arguments\":{\"ticket_id\":\"TCK-1002\",\"reason\":\"Resolved\"}}}'
 ```
 *(Notice: If close_ticket is read/write in baseline, it succeeds or behaves per baseline policy).*
 

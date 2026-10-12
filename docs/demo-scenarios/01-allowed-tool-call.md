@@ -18,18 +18,17 @@ Open PowerShell in the repo root and run this command block:
 
 ```powershell
 # 1. Obtain an identity token from Keycloak for the 'agent-reader' identity
-$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_client_secret).Trim()
+$agentSecret = (Get-Content deploy/prod/secrets/agent_reader_secret).Trim()
 $tokenResp = curl.exe -k -s -X POST https://localhost:8443/realms/agentgate/protocol/openid-connect/token `
     -H "Content-Type: application/x-www-form-urlencoded" `
     -d "grant_type=client_credentials&client_id=agent-reader&client_secret=$agentSecret"
 $agentToken = ($tokenResp | ConvertFrom-Json).access_token
 
 # 2. Invoke the 'list_tickets' tool via the AgentGateway
-$payload = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tickets","arguments":{}}}'
 curl.exe -k -s -i -X POST https://localhost:3443/ `
     -H "Authorization: Bearer $agentToken" `
     -H "Content-Type: application/json" `
-    -d $payload
+    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"list_tickets\",\"arguments\":{}}}'
 ```
 
 ### Option B: Observe the Automated Background Traffic
