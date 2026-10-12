@@ -96,7 +96,7 @@ $testArgs = @(
     "-e", "AGENTGATE_V1_DATABASE_URL=$dbUrl",
     "-e", "AGENTGATE_V1_CONTAINER_NAME=prod-agentgate",
     "-e", "AGENTGATE_V1_HOST_BACKEND_ADDR=host.docker.internal:9200",
-    "golang:1.25-alpine",
+    "golang:1.26.9-alpine",
     "go", "test", "-v", "-timeout", "180s", "./qa/v1security/..."
 )
 

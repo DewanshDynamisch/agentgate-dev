@@ -30,14 +30,14 @@ In order:
 | `gofmt -l .` | cheapest formatting signal, runs first; fails on any unformatted file |
 | `go vet ./...` | static analysis for common correctness mistakes |
 | `go test -race ./...` | full suite, race detector on (agentgate is concurrency-heavy; race = default requirement) |
-| `golangci-lint` v2.4.0 | default rule set (no project `.golangci.yml` yet); pinned for Go 1.25 support; CI gates only new findings in each PR/push diff |
+| `golangci-lint` v2.14.0 | default rule set (no project `.golangci.yml` yet); pinned so it supports the module's Go version; CI gates only new findings in each PR/push diff |
 | `govulncheck` | known-vulnerability scan against the actual module dependency graph |
 
 The Go toolchain is pinned from `agentgate/go.mod` (`go-version-file`, `check-latest`)
 so CI always matches the module's declared Go version.
 `golangci-lint` is pinned to
-[v2.4.0](https://github.com/golangci/golangci-lint/releases/tag/v2.4.0), the first release with
-Go 1.25 support.
+[v2.14.0](https://github.com/golangci/golangci-lint/releases/tag/v2.14.0) so it can analyze the
+module's declared Go version (`go 1.26.9`).
 
 ## Frontend job (`frontend/`)
 

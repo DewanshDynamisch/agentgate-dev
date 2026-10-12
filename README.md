@@ -1,6 +1,6 @@
 # AgentGate
 
-![Go Version](https://img.shields.io/badge/go-1.25.0-blue)
+![Go Version](https://img.shields.io/badge/go-1.26.9-blue)
 [![CI](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/rushi-dynmsh/agentgate-dev/actions/workflows/ci.yml)
 ![Licence](https://img.shields.io/badge/licence-TBD-lightgrey)
 
