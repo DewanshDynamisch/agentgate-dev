@@ -78,7 +78,10 @@ if (-not (Test-Path $serverKey) -or -not (Test-Path $serverCrt)) {
     Write-Host "  Server certificate already exists, skipping." -ForegroundColor Gray
 }
 
-# Copy server cert/key for individual service mounts
+# Copy server cert/key for individual service mounts.
+# On Linux the openssl container writes server.key as root with mode 600, so the
+# host user cannot read it for Copy-Item; relax permissions first (as step 7 does).
+docker run --rm -v "${secretsDir}:/sec" alpine sh -c "chmod 644 /sec/*" | Out-Null
 foreach ($svc in @("agentgate", "agentgateway", "keycloak", "admin-ui")) {
     $svcCrt = Join-Path $secretsDir "$svc.crt"
     $svcKey = Join-Path $secretsDir "$svc.key"
