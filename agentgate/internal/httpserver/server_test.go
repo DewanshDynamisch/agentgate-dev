@@ -160,14 +160,14 @@ func generateSelfSignedCert(t *testing.T, dir string) (certFile, keyFile string,
 		t.Fatal(err)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "127.0.0.1"},
-		NotBefore:    time.Now().Add(-1 * time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
-		DNSNames:     []string{"localhost"},
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:              []string{"localhost"},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
@@ -276,4 +276,3 @@ func TestServerTLS_HTTPServingWithSetTLS(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }
-

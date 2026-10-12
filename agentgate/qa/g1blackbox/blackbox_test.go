@@ -654,9 +654,9 @@ func TestContract_PolicyVersionProvenance_PresentWhenCedarReached(t *testing.T) 
 
 func TestContract_PolicyVersionProvenance_EmptyWhenCedarNotReached(t *testing.T) {
 	cases := map[string]string{
-		"missing identity": `{"execution_id":"c-prov-3","workspace_id":"ws-1","tool":{"backend_id":"b","name":"read_schedule"},"classification":{"known":true,"risk":"read"}}`,
+		"missing identity":  `{"execution_id":"c-prov-3","workspace_id":"ws-1","tool":{"backend_id":"b","name":"read_schedule"},"classification":{"known":true,"risk":"read"}}`,
 		"unknown tool":      `{"execution_id":"c-prov-4","workspace_id":"ws-1","identity":{"agent_id":"a1","roles":["reader"]},"tool":{"backend_id":"b","name":"x"},"classification":{"known":false}}`,
-		"malformed request":  `{"execution_id":"c-prov-5","workspace_id":"","identity":{"agent_id":"a1","roles":["reader"]},"tool":{"backend_id":"b","name":"read_schedule"},"classification":{"known":true,"risk":"read"}}`,
+		"malformed request": `{"execution_id":"c-prov-5","workspace_id":"","identity":{"agent_id":"a1","roles":["reader"]},"tool":{"backend_id":"b","name":"read_schedule"},"classification":{"known":true,"risk":"read"}}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

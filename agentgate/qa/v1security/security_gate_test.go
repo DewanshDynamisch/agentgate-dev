@@ -220,7 +220,7 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 	if expStatus != http.StatusUnauthorized {
 		t.Fatalf("expected status 401 for expired credential after 71s, got %d: %s", expStatus, string(expBody))
 	}
-	
+
 	expBodyStr := string(expBody)
 	if !strings.Contains(expBodyStr, "expired") {
 		t.Fatalf("expected 401 body to indicate expired, got: %s", expBodyStr)
@@ -228,7 +228,7 @@ func TestV1_05_CredentialExpiry(t *testing.T) {
 	if strings.Contains(expBodyStr, "replayed") {
 		t.Fatalf("expected 401 body NOT to indicate replayed, got: %s", expBodyStr)
 	}
-	
+
 	t.Log("TestV1_05_CredentialExpiry: passed (received 401 as expected)")
 }
 

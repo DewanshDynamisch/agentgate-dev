@@ -391,4 +391,3 @@ func TestGovAPI_DryRunCompare(t *testing.T) {
 		t.Fatalf("expected 404 for unknown version, got %d", resp404.StatusCode)
 	}
 }
-

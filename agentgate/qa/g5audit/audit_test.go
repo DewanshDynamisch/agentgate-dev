@@ -19,13 +19,13 @@ import (
 )
 
 type qaEnvironment struct {
-	pStore    policystore.Store
-	pMgr      *policymanager.Manager
-	aStore    audit.Store
-	redactor  *audit.Redactor
-	auditSvc  *audit.AuditedDecisionService
-	govSvc    *governanceintegration.GovernanceDecisionService
-	verifier  *audit.ChainVerifier
+	pStore   policystore.Store
+	pMgr     *policymanager.Manager
+	aStore   audit.Store
+	redactor *audit.Redactor
+	auditSvc *audit.AuditedDecisionService
+	govSvc   *governanceintegration.GovernanceDecisionService
+	verifier *audit.ChainVerifier
 }
 
 func setupQAEnv(t *testing.T, salt string) *qaEnvironment {

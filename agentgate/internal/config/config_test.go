@@ -581,5 +581,3 @@ func TestValidate_PartialTLSConfigRejection(t *testing.T) {
 		t.Fatalf("expected error for client CA without cert/key, got: %v", err)
 	}
 }
-
-
