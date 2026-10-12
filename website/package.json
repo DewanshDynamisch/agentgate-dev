@@ -9,6 +9,7 @@
     "typecheck": "tsc",
     "test": "node --test scripts/test/*.test.mjs",
     "check:offline": "node scripts/check-offline.mjs build",
+    "check-landing": "node scripts/check-landing.mjs",
     "prebuild": "node scripts/sync-snippets.mjs && node scripts/sync-limitations.mjs && node scripts/gen-api-docs.mjs",
     "prestart": "node scripts/sync-snippets.mjs && node scripts/sync-limitations.mjs && node scripts/gen-api-docs.mjs"
   },
