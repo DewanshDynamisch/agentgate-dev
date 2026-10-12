@@ -60,6 +60,21 @@ exit 42
     assert.match(r.output, /FAIL/i);
   });
 
+  await t.test('failing command → includes trailing diagnostic output', () => {
+    const md = `
+\`\`\`bash verify
+echo "diagnostic-start-marker"
+for i in $(seq 1 500); do echo "filler-output-line-$i"; done
+echo "diagnostic-tail-marker"
+exit 1
+\`\`\`
+`;
+    const r = runVerifier(md);
+    assert.notStrictEqual(r.code, 0, 'should fail when a command exits non-zero');
+    assert.match(r.output, /diagnostic-tail-marker/);
+    assert.doesNotMatch(r.output, /filler-output-line-1\b/);
+  });
+
   await t.test('passing command → exits zero and shows PASS', () => {
     const md = `
 \`\`\`bash verify

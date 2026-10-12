@@ -8,8 +8,9 @@ description: What GitHub Actions checks on every push/PR and what is intentional
 
 Single GitHub Actions workflow (`.github/workflows/ci.yml`) — **validation only**,
 not a deployment pipeline. Triggers on every push to `main`/`master` and every
-pull request; a `concurrency` group cancels stale runs on the same ref, and
-`permissions: contents: read` is minimal privilege. See the canonical
+pull request; a `concurrency` group cancels stale runs on the same ref. Workflow
+permissions are limited to `contents: read` and `pull-requests: read`; the latter
+lets the linter retrieve PR diffs. See the canonical
 [`docs/DEVELOPMENT/CI_BASELINE.md`](https://github.com/rushi-dynmsh/agentgate-dev/blob/main/docs/DEVELOPMENT/CI_BASELINE.md).
 
 ## Go job (`agentgate/`)
@@ -29,11 +30,14 @@ In order:
 | `gofmt -l .` | cheapest formatting signal, runs first; fails on any unformatted file |
 | `go vet ./...` | static analysis for common correctness mistakes |
 | `go test -race ./...` | full suite, race detector on (agentgate is concurrency-heavy; race = default requirement) |
-| `golangci-lint` | default rule set (no project `.golangci.yml` yet) |
+| `golangci-lint` v2.4.0 | default rule set (no project `.golangci.yml` yet); pinned for Go 1.25 support; CI gates only new findings in each PR/push diff |
 | `govulncheck` | known-vulnerability scan against the actual module dependency graph |
 
 The Go toolchain is pinned from `agentgate/go.mod` (`go-version-file`, `check-latest`)
 so CI always matches the module's declared Go version.
+`golangci-lint` is pinned to
+[v2.4.0](https://github.com/golangci/golangci-lint/releases/tag/v2.4.0), the first release with
+Go 1.25 support.
 
 ## Frontend job (`frontend/`)
 

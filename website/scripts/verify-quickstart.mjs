@@ -44,6 +44,9 @@ const COL_INDEX = 8;
 const COL_STATUS = 8;
 const COL_COMMAND = 40;
 const COL_DETAIL = 30;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const STACK_TIMEOUT_MS = 10 * 60_000;
+const DIAGNOSTIC_OUTPUT_LIMIT = 2_000;
 
 function pad(s, n) {
   const str = String(s);
@@ -102,13 +105,22 @@ echo ":::AG_EXIT ${block.index} \$?"
 
 const runnerScript = path.join(tmpDir, 'runner.sh');
 fs.writeFileSync(runnerScript, scriptContent);
+const runnerTimeoutMs = withStack ? STACK_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 const result = spawnSync('bash', ['.ag-verify-tmp/runner.sh'], {
   cwd: REPO_ROOT,
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
   shell: false,
-  timeout: 120_000,
+  timeout: runnerTimeoutMs,
 });
+
+if (result.error?.code === 'ETIMEDOUT') {
+  process.stderr.write(
+    `Quickstart verification timed out after ${Math.round(runnerTimeoutMs / 1000)} seconds.\n`
+  );
+} else if (result.error) {
+  process.stderr.write(`Could not run quickstart verifier shell: ${result.error.message}\n`);
+}
 
 const runnerStdout = result.stdout || '';
 console.log("==> RUNNER STDOUT START\\n" + runnerStdout + "\\n==> RUNNER STDOUT END");
@@ -175,7 +187,11 @@ for (const block of blocks) {
     overallPass = false;
     failedAt = block.index;
     printTableRow(block.index, 'FAIL', block.command, `exit ${exitCode}`);
-    process.stdout.write(`  Output: ${combinedOutput.slice(0, 200)}\n`);
+    const excerpt =
+      combinedOutput.length > DIAGNOSTIC_OUTPUT_LIMIT
+        ? `...${combinedOutput.slice(-DIAGNOSTIC_OUTPUT_LIMIT)}`
+        : combinedOutput;
+    process.stdout.write(`  Output: ${excerpt}\n`);
     continue;
   }
 
